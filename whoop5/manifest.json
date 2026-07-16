@@ -58,7 +58,7 @@
       { "name": "enable_passive_strap_fit_gen5", "value": 1 },
       { "name": "enable_sig11_during_sleep", "value": 1 }
     ],
-    "confidence": "JUDES, from an HCI capture round-tripped byte for byte over 8031 frames on a real MG. The official app sends fifteen writes; ten flag names are captured here and the remaining five are not yet identified. Each value byte is taken as 1 (enable); the per-flag values were not enumerated in the source, so treat the values as CODE-INFERRED. The name sits ASCII in a 32-byte field and the value byte follows at offset 32 in a 40-byte payload."
+    "confidence": "JUDES for the flag names and format, from an HCI capture round-tripped byte for byte over 8031 frames on a real MG. The official app sends fifteen writes; ten flag names are captured here, five are not yet identified. Each value byte is taken as 1 (enable); the per-flag values were not enumerated in the source, so treat the values as CODE-INFERRED. The name sits ASCII in a 32-byte field, the value byte follows at offset 32 in a 40-byte payload. IMPORTANT [FIELD]: on a real worn MG these flags are accepted and ACKed byte-for-byte but do NOT activate the deep (R22 / type 51-56) stream. Five worn sessions up to 4.1h after a full ACK produced zero deep frames, only plain type-40 heart rate. The deep buffer appears subscription- or server-gated, not BLE-flag-gated, so sending this sequence does not by itself unlock deep data on a no-subscription strap. Carry the sequence because the flags are real and correct, but expect standard heart rate and the ordinary sync buffer, not the R22 firehose, until the true gate is found."
   },
   "packets": {
     "35": "command",
