@@ -1,0 +1,95 @@
+{
+  "schema": "connector-manifest/v1",
+  "identity": {
+    "family": "whoop5",
+    "display_name": "WHOOP 5.0 / MG",
+    "models": ["WHOOP 5.0", "5.0", "WHOOP MG", "MG", "WHOOP"],
+    "fallback_for_unknown_models": true,
+    "confidence": "XVAL across three sources for the 5.0; the MG is assumed identical from APK analysis and one MG capture [HW]. The 5.0 and MG share a custom-service UUID and are indistinguishable at scan time, so both resolve here. After connect, the Device Information model string tells them apart: an MG unit reports model 'MG' (hardware 'WS50_r03', firmware 50.38.1.0 on the one captured unit). Legacy registry rows stored the bare string WHOOP, and unknown strings default to this family; see docs/protocol/whoop.md."
+  },
+  "gatt": {
+    "service": "fd4b0001-cce1-4033-93ce-002d5875f58a",
+    "command": "fd4b0002-cce1-4033-93ce-002d5875f58a",
+    "notify": [
+      "fd4b0003-cce1-4033-93ce-002d5875f58a",
+      "fd4b0004-cce1-4033-93ce-002d5875f58a",
+      "fd4b0005-cce1-4033-93ce-002d5875f58a",
+      "fd4b0007-cce1-4033-93ce-002d5875f58a"
+    ]
+  },
+  "standard_gatt": {
+    "heart_rate": { "service": "180D", "characteristic": "2A37" },
+    "battery": { "service": "180F", "characteristic": "2A19" },
+    "device_info_service": "180A",
+    "heart_rate_unbonded": false,
+    "confidence": "XVAL. The standard heart-rate profile gives live HR and RR with no custom-service handshake; on the 5.0 it needs the phone's OS bond (the whole custom service demands authenticated pairing), unlike the 4.0 where 2A37 answers unbonded."
+  },
+  "frame": {
+    "wire_format": "gen5",
+    "max_frame_bytes": 8192
+  },
+  "commands": [
+    { "name": "get_hello", "opcode": 145, "b3": 1, "note": "0x91. First write of the enable handshake." },
+    { "name": "get_advertising_name", "opcode": 141, "b3": 1, "note": "0x8d." },
+    { "name": "set_config", "opcode": 120, "b3": 1, "note": "0x78. Carries one feature flag per write; see enable_sequence." },
+    { "name": "get_data_range", "opcode": 34, "b3": 0, "note": "0x22." },
+    { "name": "send_historical", "opcode": 22, "b3": 0, "note": "0x16. Starts the historical/biometric offload; records replay as packet type 0x2f, and on the gen5 straps this buffer is the only route to the sensor because there is no live optical stream." },
+    { "name": "historical_ack", "opcode": 23, "b3": 1, "note": "0x17. Echo the 8-byte cursor from the status frame back verbatim or the offload stalls after one chunk. Advances the read pointer; deletes nothing. HISTORY_COMPLETE arrives as metadata (type 49) command 3." },
+    { "name": "force_trim", "opcode": 25, "b3": 0, "note": "0x19 = FORCE_TRIM. Irreversibly deletes the buffer up to the write head. Never send until HISTORY_COMPLETE has arrived and at least one record came back; b3 is unconfirmed on gen5, hence 0." }
+  ],
+  "enable_sequence": {
+    "command": "set_config",
+    "name_field_bytes": 32,
+    "payload_bytes": 40,
+    "flags": [
+      { "name": "enable_r22_packets", "value": 1 },
+      { "name": "enable_r22_v2_packets", "value": 1 },
+      { "name": "enable_r22_v3_packets", "value": 1 },
+      { "name": "enable_r22_v5_packets", "value": 1 },
+      { "name": "enable_r22_v6_packets", "value": 1 },
+      { "name": "enable_r22_v8_packets", "value": 1 },
+      { "name": "make_hrfm_visible", "value": 1 },
+      { "name": "hr_ch_switching", "value": 1 },
+      { "name": "enable_passive_strap_fit_gen5", "value": 1 },
+      { "name": "enable_sig11_during_sleep", "value": 1 }
+    ],
+    "confidence": "JUDES, from an HCI capture round-tripped byte for byte over 8031 frames on a real MG. The official app sends fifteen writes; ten flag names are captured here and the remaining five are not yet identified. Each value byte is taken as 1 (enable); the per-flag values were not enumerated in the source, so treat the values as CODE-INFERRED. The name sits ASCII in a 32-byte field and the value byte follows at offset 32 in a 40-byte payload."
+  },
+  "packets": {
+    "35": "command",
+    "36": "command_response",
+    "40": "realtime_data",
+    "47": "historical_data",
+    "48": "event",
+    "49": "metadata",
+    "50": "console_logs"
+  },
+  "layouts": {
+    "realtime_data": {
+      "time": {
+        "seconds_offset": 10,
+        "subseconds_offset": 14,
+        "subseconds_unit": "milliseconds",
+        "confidence": "XVAL for the offsets (gen4 offsets plus 4, HR cross-checked against GATT 2A37 to under half a bpm). The subseconds unit is CODE-INFERRED and unresolved against GET_CLOCK's 1/32768 units; see the ledger."
+      },
+      "fields": [
+        { "name": "heart_rate", "stream": "heart_rate", "type": "u8", "offset": 16 }
+      ],
+      "repeats": [
+        {
+          "name": "rr_interval",
+          "stream": "rr_interval",
+          "type": "u16_le",
+          "count_offset": 17,
+          "start_offset": 18,
+          "stride": 2,
+          "max_count": 16,
+          "drop_zero": true
+        }
+      ]
+    }
+  },
+  "record_versions": {},
+  "capabilities": ["heart_rate", "rr_interval"],
+  "confidence_note": "Realtime and command subset for Milestone 1. Packet 47 (historical_data, inner type 0x2f) is the high-rate biometric offload the enable_sequence unlocks; its 112-byte record layout is documented in docs/protocol/whoop.md and lands as a decoded layout in Milestone 5 once there is a capture fixture to admit it. Every fact here derives from docs/protocol/whoop.md and carries that ledger's tags; nothing is hardware-verified by this project yet."
+}

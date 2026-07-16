@@ -1,0 +1,75 @@
+{
+  "schema": "connector-manifest/v1",
+  "identity": {
+    "family": "whoop4",
+    "display_name": "WHOOP 4.0",
+    "models": ["WHOOP 4.0", "4.0"],
+    "fallback_for_unknown_models": false,
+    "confidence": "XVAL. The 4.0 is the well-trodden one; both surveyed codebases and the earlier community work (my-whoop, whoomp, openwhoop) target it. Its model string is stored as either '4.0' (wizard-paired) or the legacy bare 'WHOOP' row, which resolves to gen5 instead; the skin-temp family resolver bug in the NOOP lineage came from exactly that mismatch, so this manifest claims only the explicit 4.0 spellings and lets the bare 'WHOOP' fall through to whoop5."
+  },
+  "gatt": {
+    "service": "61080001-8d6d-82b8-614a-1c8cb0f8dcc6",
+    "command": "61080002-8d6d-82b8-614a-1c8cb0f8dcc6",
+    "notify": [
+      "61080003-8d6d-82b8-614a-1c8cb0f8dcc6",
+      "61080004-8d6d-82b8-614a-1c8cb0f8dcc6",
+      "61080005-8d6d-82b8-614a-1c8cb0f8dcc6"
+    ]
+  },
+  "standard_gatt": {
+    "heart_rate": { "service": "180D", "characteristic": "2A37" },
+    "battery": { "service": "180F", "characteristic": "2A19" },
+    "device_info_service": "180A",
+    "heart_rate_unbonded": true,
+    "confidence": "XVAL. On the 4.0 the standard heart-rate profile answers before any bond, which is why a just-works link is enough to read a live pulse; the custom service opens with a single just-works write rather than the authenticated pairing the 5.0 demands."
+  },
+  "frame": {
+    "wire_format": "gen4",
+    "max_frame_bytes": 8192
+  },
+  "commands": [
+    { "name": "toggle_realtime_hr", "opcode": 3, "note": "0x03. Starts the live HR/RR stream on the custom channel; realtime data comes back as packet type 0x28 (40)." },
+    { "name": "get_hello", "opcode": 35, "note": "0x23 = GET_HELLO_HARVARD, sniffed directly from a 4.0. [CONFLICT] The surveyed repos used 145 for both generations; the gen5 hello is 145, but a wire capture shows the 4.0 hello as 0x23. Settle against our own 4.0." },
+    { "name": "get_battery_level", "opcode": 26, "note": "0x1a. Response is u16 deci-percent on gen4, unlike the gen5 direct percent." },
+    { "name": "get_data_range", "opcode": 34, "note": "0x22. Response carries the last-synced page sequence as LE32 at bytes 10..13." },
+    { "name": "send_historical", "opcode": 22, "note": "0x16. Requests the historical buffer replay (packet type 0x2f)." },
+    { "name": "historical_ack", "opcode": 23, "note": "0x17. Advances the read pointer; deletes nothing. HISTORY_COMPLETE arrives as metadata (type 49) command 3." },
+    { "name": "force_trim", "opcode": 25, "note": "0x19 = FORCE_TRIM. Irreversibly deletes the buffer up to the write head. Never send until HISTORY_COMPLETE has arrived and at least one record came back; a mis-sequenced trim cost the fourth source five hours of data." }
+  ],
+  "packets": {
+    "35": "command",
+    "36": "command_response",
+    "40": "realtime_data",
+    "47": "historical_data",
+    "48": "event",
+    "49": "metadata"
+  },
+  "layouts": {
+    "realtime_data": {
+      "time": {
+        "seconds_offset": 6,
+        "subseconds_offset": 10,
+        "subseconds_unit": "milliseconds",
+        "confidence": "XVAL. These are the gen4 offsets; the gen5 layout is the same fields plus 4."
+      },
+      "fields": [
+        { "name": "heart_rate", "stream": "heart_rate", "type": "u8", "offset": 12 }
+      ],
+      "repeats": [
+        {
+          "name": "rr_interval",
+          "stream": "rr_interval",
+          "type": "u16_le",
+          "count_offset": 13,
+          "start_offset": 14,
+          "stride": 2,
+          "max_count": 16,
+          "drop_zero": true
+        }
+      ]
+    }
+  },
+  "record_versions": {},
+  "capabilities": ["heart_rate", "rr_interval"],
+  "confidence_note": "Realtime and command subset for the same slice the whoop5 manifest covers. The 4.0's real distinctiveness is its historical V24 record and its skin-temperature scale, both of which land in Milestone 5: V24 decode, and a DeviceCodec that learns a per-device skin-temp anchor. That codec is deliberately not written yet, because the gen4 absolute skin-temp scale is in [CONFLICT] between the two surveyed sources and has no golden fixture, so admitting it now would break the fixture-admission rule (ADR-009). It is the canonical example of why connectors need a codec and not just a manifest; see docs/connectors.md."
+}
