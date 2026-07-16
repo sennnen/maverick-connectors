@@ -27,6 +27,7 @@
     "wire_format": "gen4",
     "max_frame_bytes": 8192
   },
+  "interval_source": "ppg",
   "commands": [
     { "name": "toggle_realtime_hr", "opcode": 3, "note": "0x03. Starts the live HR/RR stream on the custom channel; realtime data comes back as packet type 0x28 (40). Does not need the feature-flag handshake below." },
     { "name": "get_hello", "opcode": 35, "note": "0x23 = GET_HELLO_HARVARD, sniffed directly from a 4.0. [CONFLICT] The surveyed repos used 145 for both generations; the gen5 hello is 145, but a wire capture shows the 4.0 hello as 0x23. Settle against our own 4.0." },

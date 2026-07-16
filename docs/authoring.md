@@ -22,6 +22,10 @@ a specific physical device over time, or any stateful decode; those belong in a 
 example is the WHOOP 4.0 skin-temperature anchor, which is different for every strap and does not
 exist until the strap has been worn, so it cannot sit in a static file.
 
+If a connector produces beat-to-beat intervals, it also declares `interval_source` as `ppg`, `ecg`,
+or `unknown`. This is not cosmetic: Maverick labels optical output pulse-rate variability and
+reserves heart-rate variability for ECG-derived intervals.
+
 ## Confidence tags
 
 Nothing in these manifests has been confirmed against a physical strap yet, so every fact carries a
