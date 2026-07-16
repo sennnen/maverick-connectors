@@ -34,17 +34,26 @@ dependency, whichever the target prefers:
 
 - The Maverick app reads the manifests directly. Point it at a checkout of this repository, or
   vendor the folders you want.
-- The core repository pulls this in as a git submodule at `connectors/`, purely so its tests and the
-  hardware-free development slice can run against a known set of manifests. That submodule is a
-  development convenience, not a bundling step; the shipped app still imports connectors rather than
-  embedding them.
+- To develop or test the core against a known set of manifests, check this repository out alongside
+  it. The core does not bundle these; it reads them for development only, and the shipped app imports
+  connectors rather than embedding them.
+
+The step-by-step for writing one is in [docs/authoring.md](docs/authoring.md).
 
 ## Validating a manifest
 
-Manifests are validated against the schema in the core's `mav-codec` crate. A connector is correct
-when it parses through `Manifest::from_json` and decodes its device's frames to the expected
-samples. The validation harness that runs those checks depends on `mav-codec`; it does not add a
-dependency the other way, which is the whole point.
+Two checks. The shallow structural one runs here with only a Python interpreter, and is what this
+repository's CI uses:
+
+    python3 tools/validate.py
+
+The deep one runs a manifest through the core's real `mav-codec` schema. Check the core out
+alongside this repository and run its example tool against this directory:
+
+    cargo run -p mav-codec --example validate_manifests -- ../maverick-connectors
+
+The dependency runs one way: a connector validates against `mav-codec`, and `mav-codec` never learns
+about any specific device, which is the whole point.
 
 ## The one connector the app may ship with
 

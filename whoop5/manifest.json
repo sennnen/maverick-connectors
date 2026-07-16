@@ -29,9 +29,14 @@
     "max_frame_bytes": 8192
   },
   "commands": [
-    { "name": "get_hello", "opcode": 145, "b3": 1, "note": "0x91. First write of the enable handshake." },
+    { "name": "get_hello", "opcode": 145, "b3": 1, "note": "0x91. First write of the enable handshake; the gen5 hello is its own opcode, unlike the gen4 hello at 0x23." },
     { "name": "get_advertising_name", "opcode": 141, "b3": 1, "note": "0x8d." },
+    { "name": "set_clock", "opcode": 10, "note": "0x0a. Clock sync. b3 unconfirmed on gen5." },
+    { "name": "toggle_realtime_hr", "opcode": 3, "note": "0x03. Starts the standard heart-rate profile; the deep biometric data still comes from the sync buffer, not a live stream. b3 unconfirmed." },
     { "name": "set_config", "opcode": 120, "b3": 1, "note": "0x78. Carries one feature flag per write; see enable_sequence." },
+    { "name": "feature_flag_query", "opcode": 117, "note": "0x75. Begins the feature-flag exchange the app runs before set_config. b3 unconfirmed." },
+    { "name": "feature_flag_next", "opcode": 118, "note": "0x76. Iterates the feature-flag exchange. b3 unconfirmed." },
+    { "name": "get_battery_level", "opcode": 26, "note": "0x1a. On gen5 the response is a direct percent byte, unlike gen4's deci-percent u16. b3 unconfirmed." },
     { "name": "get_data_range", "opcode": 34, "b3": 0, "note": "0x22." },
     { "name": "send_historical", "opcode": 22, "b3": 0, "note": "0x16. Starts the historical/biometric offload; records replay as packet type 0x2f, and on the gen5 straps this buffer is the only route to the sensor because there is no live optical stream." },
     { "name": "historical_ack", "opcode": 23, "b3": 1, "note": "0x17. Echo the 8-byte cursor from the status frame back verbatim or the offload stalls after one chunk. Advances the read pointer; deletes nothing. HISTORY_COMPLETE arrives as metadata (type 49) command 3." },
