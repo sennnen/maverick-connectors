@@ -89,7 +89,7 @@
       ]
     }
   },
-  "record_versions": {},
-  "capabilities": ["heart_rate", "rr_interval"],
-  "confidence_note": "Realtime and command subset for the same slice the whoop5 manifest covers. The 4.0's real distinctiveness is its historical V24 record and its skin-temperature scale, both of which land in Milestone 5: V24 decode, and a DeviceCodec that learns a per-device skin-temp anchor. That codec is deliberately not written yet, because the gen4 absolute skin-temp scale is in [CONFLICT] between the two surveyed sources and has no golden fixture, so admitting it now would break the fixture-admission rule (ADR-009). It is the canonical example of why connectors need a codec and not just a manifest; see docs/connectors.md."
+  "record_versions": { "5": "gen4_v5", "7": "gen4_v5", "9": "gen4_v5", "12": "gen4_v24", "24": "gen4_v24", "25": "gen4_v25" },
+  "capabilities": ["heart_rate", "rr_interval", "gravity", "spo2_raw", "skin_temp", "resp_raw"],
+  "confidence_note": "Realtime, command subset, and the historical record decoders. Packet 47 records route by inner byte [1] (the version): gen4_v24 (also v12) decodes the DSP block (HR body[14], R-R body[15]/[16], gravity three f32 from body[33], SpO2 red/IR raw ADC body[61]/[63], skin-temp register body[65:67], respiration body[73:75]); gen4_v5 (also v7/v9) decodes the generic HR+R-R record; gen4_v25 decodes the PPG-buffer record's gravity triplet (i16/16384 from body[66]). v24 and v25 are backed by real 4.0 capture goldens imported from tanarchytan/whoop-rs [WRS] (fixtures/records/gen4_v24_v1.json, gen4_v25_v1.json); v5 has no real capture yet and is pinned by an invariant round-trip test. The skin-temp RAW register is now admitted, but its absolute °C scale stays a deferred per-device learned anchor: the gen4 scale is in [CONFLICT] between sources with no calibration golden, so no temperature is claimed here (ADR-009). Unknown version bytes decode to a typed DECODE_UNKNOWN_RECORD_VERSION rather than the guess-fallback the upstream RE uses; Maverick admits only mapped versions. Nothing is hardware-verified by this project yet."
 }
