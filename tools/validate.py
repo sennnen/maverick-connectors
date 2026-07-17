@@ -54,13 +54,15 @@ def check(manifest_path: Path) -> list[str]:
                 f"{manifest_path}: enable_sequence leaves no room for a value byte"
             )
 
-    # A record-version layout key must name a layout that exists (a packet-type key that has no
-    # layout is fine; it means the packet is known but not decoded to samples yet).
-    layouts = set(m.get("layouts", {}))
-    for version, key in m.get("record_versions", {}).items():
-        if key not in layouts:
+    # record_versions maps a version byte to an admitted record-decoder id -- a reviewed module in
+    # the core's mav-codec (for example "r20_k18"), not a manifest layout. Historical records route
+    # through those decoders, not through the layout DSL, so the shallow check here only confirms the
+    # value is a non-empty string; the core's `validate_manifests` example checks it against the
+    # actual admitted-decoder list.
+    for version, decoder in m.get("record_versions", {}).items():
+        if not isinstance(decoder, str) or not decoder:
             problems.append(
-                f"{manifest_path}: record_versions[{version}] -> {key!r} has no layout"
+                f"{manifest_path}: record_versions[{version}] must name a record decoder"
             )
     return problems
 

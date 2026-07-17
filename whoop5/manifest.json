@@ -95,7 +95,7 @@
       ]
     }
   },
-  "record_versions": {},
-  "capabilities": ["heart_rate", "rr_interval"],
-  "confidence_note": "Realtime and command subset for Milestone 1. Packet 47 (historical_data, inner type 0x2f) is the high-rate biometric offload the enable_sequence unlocks; its 112-byte record layout is documented in docs/protocol/whoop.md and lands as a decoded layout in Milestone 5 once there is a capture fixture to admit it. Every fact here derives from docs/protocol/whoop.md and carries that ledger's tags; nothing is hardware-verified by this project yet."
+  "record_versions": { "18": "r20_k18", "26": "r20_k26" },
+  "capabilities": ["heart_rate", "rr_interval", "skin_temp", "sleep_state_raw", "ppg"],
+  "confidence_note": "Realtime, command subset, and the first admitted historical records. Packet 47 (historical_data, inner type 0x2f) is the biometric offload; the layout version rides inner byte [1] (the sequence position), not [2] (which carries the on-wrist r22 command). r20_k18 decodes the per-second metrics record (HR at body[11], skin temp at body[62:64], packed sleep state at body[70]); r20_k26 decodes the 24 i16 raw-PPG burst at body[16:64]. Both decoders are admitted in the core's mav-codec and are now backed by real 5.0/MG capture goldens (fixtures/records/r20_k18_v1.json and r20_k26_v1.json), imported from tanarchytan/whoop-rs [WRS]. The residual v18 fields (RR, gravity, steps, activity, the sleep-only SpO2 percent) and the deep buffers (v20 optical, v21 IMU) land in later packets. Every fact here derives from docs/protocol/whoop.md and carries that ledger's tags; nothing is hardware-verified by this project yet."
 }
