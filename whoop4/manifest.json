@@ -67,21 +67,21 @@
   "layouts": {
     "realtime_data": {
       "time": {
-        "seconds_offset": 6,
-        "subseconds_offset": 10,
+        "seconds_offset": 2,
+        "subseconds_offset": 6,
         "subseconds_unit": "milliseconds",
-        "confidence": "XVAL. These are the gen4 offsets; the gen5 layout is the same fields plus 4."
+        "confidence": "XVAL for the fields, [WRS] for the payload-relative byte positions: layout offsets are into the inner record (payload[0] = packet type), where the timestamp sits at 2 and HR at 8 on BOTH generations — the survey numbers (gen4 6/10/12, gen5 plus 4) counted from the full frame, whose header is 4 bytes on gen4 and 8 on gen5."
       },
       "fields": [
-        { "name": "heart_rate", "stream": "heart_rate", "type": "u8", "offset": 12 }
+        { "name": "heart_rate", "stream": "heart_rate", "type": "u8", "offset": 8 }
       ],
       "repeats": [
         {
           "name": "rr_interval",
           "stream": "rr_interval",
           "type": "u16_le",
-          "count_offset": 13,
-          "start_offset": 14,
+          "count_offset": 9,
+          "start_offset": 10,
           "stride": 2,
           "max_count": 16,
           "drop_zero": true

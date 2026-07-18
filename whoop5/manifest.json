@@ -73,21 +73,21 @@
   "layouts": {
     "realtime_data": {
       "time": {
-        "seconds_offset": 10,
-        "subseconds_offset": 14,
+        "seconds_offset": 2,
+        "subseconds_offset": 6,
         "subseconds_unit": "milliseconds",
-        "confidence": "XVAL for the offsets (gen4 offsets plus 4, HR cross-checked against GATT 2A37 to under half a bpm). The subseconds unit is CODE-INFERRED and unresolved against GET_CLOCK's 1/32768 units; see the ledger."
+        "confidence": "XVAL for the fields (HR cross-checked against GATT 2A37 to under half a bpm), [WRS] for the payload-relative byte positions: layout offsets are into the inner record (payload[0] = packet type), where the timestamp sits at 2 and HR at 8 on BOTH generations — the earlier +4 gen4/gen5 split was an artifact of counting from the full frame (whose header is 4 bytes on gen4 and 8 on gen5). The subseconds unit is CODE-INFERRED and unresolved against GET_CLOCK's 1/32768 units; see the ledger."
       },
       "fields": [
-        { "name": "heart_rate", "stream": "heart_rate", "type": "u8", "offset": 16 }
+        { "name": "heart_rate", "stream": "heart_rate", "type": "u8", "offset": 8 }
       ],
       "repeats": [
         {
           "name": "rr_interval",
           "stream": "rr_interval",
           "type": "u16_le",
-          "count_offset": 17,
-          "start_offset": 18,
+          "count_offset": 9,
+          "start_offset": 10,
           "stride": 2,
           "max_count": 16,
           "drop_zero": true
