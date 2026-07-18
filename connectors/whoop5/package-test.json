@@ -1,0 +1,10 @@
+{
+  "schema": "mavconn-package-test/v1",
+  "package": "mav-connector-whoop5",
+  "wasm": "mav_connector_whoop5.wasm",
+  "publisher_key_id": "maverick-whoop-test",
+  "public_key_hex": "3cdce854fcf412dfc31572421f2c57a7a9f5c6c58c138c0785dbdf5c85faeeaf",
+  "signed_sha256": "c357fe09ec18612995fec2c47812c6f8045b022e9dd19f809fc02976b9aa64e6",
+  "signature_hex": "75a04b26debffdfc86f143890b0ca3b741009741840ff7512aad1f68fa3502316e658e558671f857187d03e6ae3c2441bcac275489bb647231d763a569791f06",
+  "artifact_sha256": "db76da2b8dd1467d790f359f6dcc2302c73d656667cfdce8b1b029e71e48d492"
+}

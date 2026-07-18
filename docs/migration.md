@@ -9,7 +9,7 @@ back to data-only folders or compiled app extensions.
 
 The two legacy JSON manifests and their structural validator remain only as WC-P12 migration
 evidence. WC-P8 added the pure shared protocol reference, and WC-P9 added a functional signed-test
-WHOOP 4.0 artifact beside the old path. Both
+WHOOP 4.0 artifact beside the old path; WC-P10 added the WHOOP 5.0/MG artifact. Both
 manifests name compiled codec id `whoop`; they cannot install functional logic independently. README
 and authoring docs instructed developers to add a crate under Maverick and register it in both edge
 crates. That is the bundled architecture ADR-017 replaces.
@@ -31,7 +31,8 @@ adjudication.
   desktop, async transport, persistence, FFI, and analytics.
 - **WC-P9 (complete):** standalone WHOOP 4.0 SDK project, externally signed test artifact, eleven
   packaged fixtures, and install proof through the existing public runtime.
-- **WC-P10:** create standalone WHOOP 5.0/MG SDK project and signed test artifact.
+- **WC-P10 (complete):** standalone paired WHOOP 5.0/MG SDK project, externally signed test
+  artifact, nine packaged fixtures, and explicit deep-stream uncertainty.
 - **WC-P11:** provide artifact hashes, state traces, native/Wasm parity fixtures, and performance
   inputs to cross-platform proof.
 - **WC-P12:** after proof and runtime switch, delete `whoop4/manifest.json`,

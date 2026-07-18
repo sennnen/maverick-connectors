@@ -28,6 +28,7 @@ decision in [ADR-017](https://github.com/sennnen/maverick/blob/main/docs/adr/ADR
 
 - `connectors/template/` — exact-version public SDK consumer, native test, Wasm exports, metadata;
 - `connectors/whoop4/` — signed-test packaged WHOOP 4.0 connector with eleven embedded fixtures;
+- `connectors/whoop5/` — signed-test packaged WHOOP 5.0/MG connector with nine embedded fixtures;
 - `crates/whoop-protocol/` — no-std pure framing, control, safe-offload, and record-routing reference;
 - `registry/schema-v1.json` — frozen ABI v1 schema hashes used by external authors;
 - `whoop4/manifest.json` — legacy WHOOP 4.0 manifest, retained as migration evidence.

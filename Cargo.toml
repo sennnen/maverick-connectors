@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "connectors/template",
     "connectors/whoop4",
+    "connectors/whoop5",
     "crates/whoop-protocol",
 ]
 

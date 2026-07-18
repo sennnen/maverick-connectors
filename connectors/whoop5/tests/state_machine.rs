@@ -1,0 +1,452 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+use mav_connector_sdk::abi::*;
+use mav_connector_sdk::TestDriver;
+use mav_connector_whoop5::{Whoop5Connector, CONNECTOR_ID, GEN5_SERVICE};
+use whoop_protocol::{crc16_modbus, crc32, decode_frame, Generation};
+
+fn event(sequence: u64, body: EventBody) -> ConnectorEvent {
+    ConnectorEvent {
+        connector_id: ConnectorId::new(CONNECTOR_ID).unwrap(),
+        session_id: SessionId(5),
+        sequence: EventSequence(sequence),
+        cancellation_generation: CancellationGeneration(0),
+        wall_time_ms: Some(1_780_000_000_000),
+        body,
+    }
+}
+
+fn bodies(batch: ActionBatch) -> Vec<ActionBody> {
+    batch
+        .actions
+        .into_iter()
+        .map(|action| action.body)
+        .collect()
+}
+
+fn gen5_frame(payload: &[u8]) -> Vec<u8> {
+    let padded = payload.len().div_ceil(4) * 4;
+    let declared = u16::try_from(padded + 4).unwrap();
+    let length = declared.to_le_bytes();
+    let mut frame = vec![0xaa, 1, length[0], length[1], 1, 0, 0, 0];
+    let header_crc = crc16_modbus(&frame[..6]).to_le_bytes();
+    frame[6..8].copy_from_slice(&header_crc);
+    frame.extend_from_slice(payload);
+    frame.resize(8 + padded, 0);
+    frame.extend_from_slice(&crc32(&frame[8..]).to_le_bytes());
+    frame
+}
+
+fn drive_to_subscribing(driver: &mut TestDriver<Whoop5Connector>) {
+    driver.drive(event(1, EventBody::Activate)).unwrap();
+    driver
+        .drive(event(
+            2,
+            EventBody::Advertisement {
+                address: "strap-5".to_owned(),
+                rssi: -41,
+                service_uuids: vec![GEN5_SERVICE.to_owned()],
+                manufacturer_data: Vec::new(),
+                name: Some("WHOOP MG".to_owned()),
+            },
+        ))
+        .unwrap();
+    assert_eq!(
+        bodies(
+            driver
+                .drive(event(3, EventBody::Connected { mtu: 247 }))
+                .unwrap()
+        ),
+        vec![ActionBody::EnsurePaired]
+    );
+    driver
+        .drive(event(
+            4,
+            EventBody::PairingResult {
+                success: true,
+                error_code: None,
+            },
+        ))
+        .unwrap();
+    driver
+        .drive(event(
+            5,
+            EventBody::ServicesDiscovered {
+                service_uuids: vec![GEN5_SERVICE.to_owned(), "180d".to_owned()],
+            },
+        ))
+        .unwrap();
+}
+
+#[test]
+fn both_scan_identities_require_pairing_before_discovery() {
+    for name in ["WHOOP 5.0", "WHOOP MG", "WHOOP"] {
+        let mut driver = TestDriver::new(Whoop5Connector::default());
+        driver.drive(event(1, EventBody::Activate)).unwrap();
+        let advertised = bodies(
+            driver
+                .drive(event(
+                    2,
+                    EventBody::Advertisement {
+                        address: "strap-5".to_owned(),
+                        rssi: -40,
+                        service_uuids: vec![GEN5_SERVICE.to_owned()],
+                        manufacturer_data: Vec::new(),
+                        name: Some(name.to_owned()),
+                    },
+                ))
+                .unwrap(),
+        );
+        assert!(matches!(
+            advertised.as_slice(),
+            [ActionBody::StopScan, ActionBody::Connect { .. }]
+        ));
+        assert_eq!(
+            bodies(
+                driver
+                    .drive(event(3, EventBody::Connected { mtu: 247 }))
+                    .unwrap()
+            ),
+            vec![ActionBody::EnsurePaired]
+        );
+        assert_eq!(
+            bodies(
+                driver
+                    .drive(event(
+                        4,
+                        EventBody::PairingResult {
+                            success: true,
+                            error_code: None,
+                        },
+                    ))
+                    .unwrap()
+            ),
+            vec![ActionBody::DiscoverServices]
+        );
+    }
+}
+
+#[test]
+fn model_identity_accepts_5_and_mg_but_rejects_4() {
+    for model in ["5.0", "MG", "WHOOP"] {
+        let mut driver = TestDriver::new(Whoop5Connector::default());
+        assert!(driver
+            .drive(event(
+                1,
+                EventBody::IdentityRead {
+                    field_id: "model-number".to_owned(),
+                    bytes: model.as_bytes().to_vec(),
+                },
+            ))
+            .unwrap()
+            .actions
+            .is_empty());
+    }
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    let rejected = bodies(
+        driver
+            .drive(event(
+                1,
+                EventBody::IdentityRead {
+                    field_id: "model-number".to_owned(),
+                    bytes: b"4.0".to_vec(),
+                },
+            ))
+            .unwrap(),
+    );
+    assert!(matches!(rejected[0], ActionBody::EmitDiagnostic { .. }));
+    assert_eq!(rejected[1], ActionBody::Disconnect);
+}
+
+#[test]
+fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    drive_to_subscribing(&mut driver);
+    for (sequence, characteristic) in [
+        (6, "standard-heart-rate"),
+        (7, "command-response"),
+        (8, "events"),
+        (9, "data"),
+    ] {
+        assert!(driver
+            .drive(event(
+                sequence,
+                EventBody::Subscribed {
+                    characteristic_id: characteristic.to_owned(),
+                },
+            ))
+            .unwrap()
+            .actions
+            .is_empty());
+    }
+    let hello = bodies(
+        driver
+            .drive(event(
+                10,
+                EventBody::Subscribed {
+                    characteristic_id: "data-secondary".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+    let [ActionBody::Write {
+        bytes, confirmed, ..
+    }] = hello.as_slice()
+    else {
+        panic!("expected confirmed hello");
+    };
+    assert!(*confirmed);
+    assert_eq!(
+        decode_frame(Generation::Gen5, bytes).unwrap(),
+        [0x23, 1, 145, 1]
+    );
+
+    let query = bodies(
+        driver
+            .drive(event(
+                11,
+                EventBody::WriteResult {
+                    operation_id: OperationId(10),
+                    characteristic_id: "command".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+    let ActionBody::Write { bytes, .. } = &query[0] else {
+        panic!("query write");
+    };
+    assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 117);
+
+    let next = bodies(
+        driver
+            .drive(event(
+                12,
+                EventBody::WriteResult {
+                    operation_id: OperationId(11),
+                    characteristic_id: "command".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+    let ActionBody::Write { bytes, .. } = &next[0] else {
+        panic!("next write");
+    };
+    assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 118);
+
+    let flag = bodies(
+        driver
+            .drive(event(
+                13,
+                EventBody::WriteResult {
+                    operation_id: OperationId(12),
+                    characteristic_id: "command".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+    let ActionBody::Write { bytes, .. } = &flag[0] else {
+        panic!("flag write");
+    };
+    let payload = decode_frame(Generation::Gen5, bytes).unwrap();
+    assert_eq!(payload[2], 120);
+    assert_eq!(&payload[3..21], b"enable_r22_packets");
+
+    for sequence in 14..=22 {
+        let batch = bodies(
+            driver
+                .drive(event(
+                    sequence,
+                    EventBody::WriteResult {
+                        operation_id: OperationId(sequence),
+                        characteristic_id: "command".to_owned(),
+                    },
+                ))
+                .unwrap(),
+        );
+        let ActionBody::Write { bytes, .. } = &batch[0] else {
+            panic!("remaining feature flag write");
+        };
+        assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 120);
+    }
+    let completed = bodies(
+        driver
+            .drive(event(
+                23,
+                EventBody::WriteResult {
+                    operation_id: OperationId(23),
+                    characteristic_id: "command".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+    assert!(matches!(
+        completed[0],
+        ActionBody::DeclareCapabilities { .. }
+    ));
+    assert!(matches!(completed[1], ActionBody::EmitDiagnostic { .. }));
+    assert!(matches!(
+        completed[2],
+        ActionBody::SetTimer {
+            token: TimerToken(200),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn cancellation_disconnect_and_restore_are_generation_safe() {
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    drive_to_subscribing(&mut driver);
+    let cancelled = bodies(
+        driver
+            .drive(event(
+                6,
+                EventBody::Cancel {
+                    reason: CancelReason::User,
+                },
+            ))
+            .unwrap(),
+    );
+    assert_eq!(cancelled.last(), Some(&ActionBody::Disconnect));
+    let state = driver.snapshot().unwrap();
+
+    let mut restored = TestDriver::new(Whoop5Connector::default());
+    restored
+        .drive(event(
+            1,
+            EventBody::RestoreState {
+                bytes: state.clone(),
+            },
+        ))
+        .unwrap();
+    assert_eq!(restored.snapshot().unwrap(), state);
+    assert!(matches!(
+        bodies(restored.drive(event(2, EventBody::Resume)).unwrap()).as_slice(),
+        [ActionBody::StartScan { .. }]
+    ));
+}
+
+#[test]
+fn history_idle_response_cursor_ack_and_timeout_are_safe() {
+    let streaming_state = vec![0x57, 0x35, 1, 7, 0x1f, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 12, 1];
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    driver
+        .drive(event(
+            1,
+            EventBody::RestoreState {
+                bytes: streaming_state,
+            },
+        ))
+        .unwrap();
+    let range = bodies(
+        driver
+            .drive(event(
+                2,
+                EventBody::TimerFired {
+                    token: TimerToken(200),
+                },
+            ))
+            .unwrap(),
+    );
+    let ActionBody::Write { bytes, .. } = &range[0] else {
+        panic!("range write");
+    };
+    assert_eq!(
+        decode_frame(Generation::Gen5, bytes).unwrap(),
+        [0x23, 1, 34, 0]
+    );
+
+    let request = bodies(
+        driver
+            .drive(event(
+                3,
+                EventBody::Notification {
+                    characteristic_id: "command-response".to_owned(),
+                    bytes: gen5_frame(&[0x24, 1, 34, 1]),
+                },
+            ))
+            .unwrap(),
+    );
+    let ActionBody::Write { bytes, .. } = &request[0] else {
+        panic!("history write");
+    };
+    assert_eq!(
+        decode_frame(Generation::Gen5, bytes).unwrap(),
+        [0x23, 2, 22, 0]
+    );
+
+    let history_end =
+        unhex("aa011c00010023d1319102b949596a705d3b000000fdba010010000000000000f269faec");
+    let ack = bodies(
+        driver
+            .drive(event(
+                4,
+                EventBody::Notification {
+                    characteristic_id: "data".to_owned(),
+                    bytes: history_end,
+                },
+            ))
+            .unwrap(),
+    );
+    let [ActionBody::Write { bytes, .. }] = ack.as_slice() else {
+        panic!("cursor ack");
+    };
+    assert_eq!(
+        &decode_frame(Generation::Gen5, bytes).unwrap()[..12],
+        &[0x23, 3, 23, 1, 0xfd, 0xba, 1, 0, 16, 0, 0, 0]
+    );
+
+    let retry = bodies(
+        driver
+            .drive(event(
+                5,
+                EventBody::TimerFired {
+                    token: TimerToken(201),
+                },
+            ))
+            .unwrap(),
+    );
+    let ActionBody::Write { bytes, .. } = &retry[0] else {
+        panic!("bounded history retry");
+    };
+    assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 22);
+}
+
+#[test]
+fn deep_imu_notification_splits_at_the_abi_sample_bound() {
+    let mut payload = vec![0u8; 1_232];
+    payload[0] = 47;
+    payload[1] = 21;
+    let body = &mut payload[3..];
+    body[4..8].copy_from_slice(&1_780_000_000u32.to_le_bytes());
+    body[13..15].copy_from_slice(&100u16.to_le_bytes());
+    body[619..621].copy_from_slice(&100u16.to_le_bytes());
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    let emitted = bodies(
+        driver
+            .drive(event(
+                1,
+                EventBody::Notification {
+                    characteristic_id: "data".to_owned(),
+                    bytes: gen5_frame(&payload),
+                },
+            ))
+            .unwrap(),
+    );
+    let [ActionBody::EmitSamples { samples: first, .. }, ActionBody::EmitSamples {
+        samples: second, ..
+    }] = emitted.as_slice()
+    else {
+        panic!("deep samples must split into two batches");
+    };
+    assert_eq!(first.len(), MAX_SAMPLES_PER_ACTION);
+    assert_eq!(second.len(), 600 - MAX_SAMPLES_PER_ACTION);
+}
+
+fn unhex(value: &str) -> Vec<u8> {
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(core::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
+}
