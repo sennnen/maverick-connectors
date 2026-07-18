@@ -3,8 +3,9 @@ pub mod decode;
 use decode::{decode_payload, decode_standard_heart_rate};
 use mav_connector_sdk::abi::*;
 use mav_connector_sdk::{
-    artifact_metadata, export_connector, ActionBuilder, Connector, ConnectorError,
+    artifact_metadata, export_connector, ActionBuilder, Connector, ConnectorError, TestDriver,
 };
+use sha2::{Digest, Sha256};
 use whoop_protocol::{
     build_command, decode_control, decode_frame, get_data_range, history_ack, request_history,
     Control, ControlResult, Generation,
@@ -709,9 +710,111 @@ fn fixture_set() -> Result<FixtureSet, ConnectorError> {
     }];
     cases.extend(record_fixtures()?);
     cases.extend(stream_fixtures()?);
+    cases.extend(parity_fixtures()?);
     Ok(FixtureSet {
         schema: FIXTURES_SCHEMA.to_owned(),
         cases,
+    })
+}
+
+fn parity_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
+    let history_end = {
+        let cursor = [1, 2, 3, 4, 5, 6, 7, 8];
+        let mut payload = vec![0x31, 9, 2];
+        payload.extend_from_slice(&[0; 10]);
+        payload.extend_from_slice(&cursor);
+        fixture_gen4_frame(&payload)?
+    };
+    Ok(vec![
+        native_parity_fixture(
+            "history-cursor-retry",
+            streaming_fixture_state(),
+            vec![
+                fixture_event(1, EventBody::TimerFired { token: IDLE_TIMER })?,
+                fixture_event(
+                    2,
+                    EventBody::Notification {
+                        characteristic_id: COMMAND_RESPONSE_ID.to_owned(),
+                        bytes: fixture_gen4_frame(&[0x24, 1, 34, 1])?,
+                    },
+                )?,
+                fixture_event(
+                    3,
+                    EventBody::Notification {
+                        characteristic_id: DATA_ID.to_owned(),
+                        bytes: history_end,
+                    },
+                )?,
+                fixture_event(
+                    4,
+                    EventBody::TimerFired {
+                        token: RESPONSE_TIMER,
+                    },
+                )?,
+            ],
+        )?,
+        native_parity_fixture(
+            "state-restart",
+            streaming_fixture_state(),
+            vec![fixture_event(1, EventBody::Resume)?],
+        )?,
+        native_parity_fixture(
+            "malformed-frame",
+            streaming_fixture_state(),
+            vec![fixture_event(
+                1,
+                EventBody::Notification {
+                    characteristic_id: DATA_ID.to_owned(),
+                    bytes: vec![0xaa, 0x01],
+                },
+            )?],
+        )?,
+    ])
+}
+
+fn native_parity_fixture(
+    name: &str,
+    initial_state: Vec<u8>,
+    events: Vec<ConnectorEvent>,
+) -> Result<FixtureCase, ConnectorError> {
+    let first = events.first().ok_or_else(|| {
+        ConnectorError::InvalidWire("parity fixture must contain an event".to_owned())
+    })?;
+    let mut driver = TestDriver::new(Whoop4Connector::default());
+    let mut restore = first.clone();
+    restore.body = EventBody::RestoreState {
+        bytes: initial_state.clone(),
+    };
+    if !driver.init(restore)?.actions.is_empty() {
+        return Err(ConnectorError::InvalidWire(
+            "state restore emitted parity actions".to_owned(),
+        ));
+    }
+    let mut expected = Vec::with_capacity(events.len());
+    for event in &events {
+        expected.push(driver.drive(event.clone())?);
+    }
+    let expected_state_hash = Sha256::digest(driver.snapshot()?).into();
+    Ok(FixtureCase {
+        name: name.to_owned(),
+        initial_state,
+        events,
+        expected,
+        expected_state_hash,
+        max_fuel: 1_000_000,
+        expected_samples: None,
+        expected_diagnostics: None,
+    })
+}
+
+fn fixture_event(sequence: u64, body: EventBody) -> Result<ConnectorEvent, ConnectorError> {
+    Ok(ConnectorEvent {
+        connector_id: ConnectorId::new(CONNECTOR_ID)?,
+        session_id: SessionId(1),
+        sequence: EventSequence(sequence),
+        cancellation_generation: CancellationGeneration(0),
+        wall_time_ms: Some(1_780_000_000_000),
+        body,
     })
 }
 

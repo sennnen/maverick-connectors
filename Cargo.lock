@@ -94,6 +94,7 @@ name = "mav-connector-whoop4"
 version = "0.1.0"
 dependencies = [
  "mav-connector-sdk",
+ "sha2",
  "whoop-protocol",
 ]
 
@@ -102,6 +103,7 @@ name = "mav-connector-whoop5"
 version = "0.1.0"
 dependencies = [
  "mav-connector-sdk",
+ "sha2",
  "whoop-protocol",
 ]
 

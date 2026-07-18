@@ -170,6 +170,21 @@ def workspace_checks(root: Path) -> list[str]:
             value = config[field]
             if len(value) != length or any(character not in "0123456789abcdef" for character in value):
                 problems.append(f"{config_path}: {field} is not canonical lowercase hex")
+        parity_path = config_path.parent / "parity-v1.json"
+        if not parity_path.is_file():
+            problems.append(f"{parity_path}: packaged parity report is missing")
+        else:
+            try:
+                parity = json.loads(parity_path.read_text())
+            except json.JSONDecodeError:
+                problems.append(f"{parity_path}: invalid parity JSON")
+            else:
+                if parity.get("schema") != "mavconn-parity/v1":
+                    problems.append(f"{parity_path}: parity schema differs")
+                if parity.get("artifact_sha256") != config["artifact_sha256"]:
+                    problems.append(f"{parity_path}: artifact hash differs from package config")
+                if not parity.get("fixtures"):
+                    problems.append(f"{parity_path}: parity fixtures are empty")
     forbidden_suffixes = {".jks", ".p12", ".pfx", ".key", ".pem"}
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() in forbidden_suffixes:
@@ -310,10 +325,20 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
                 [str(tool_dir / "mavconn-validate"), str(artifact), config["public_key_hex"]],
                 root,
             )
+            generated_report = package_temp / "parity-v1.json"
             run(
-                [str(tool_dir / "mavconn-test"), str(artifact), config["public_key_hex"]],
+                [
+                    str(tool_dir / "mavconn-test"),
+                    str(artifact),
+                    config["public_key_hex"],
+                    "--report",
+                    str(generated_report),
+                ],
                 root,
             )
+            expected_report = config_path.parent / "parity-v1.json"
+            if generated_report.read_bytes() != expected_report.read_bytes():
+                raise RuntimeError(f"{expected_report}: generated parity report differs")
 
 
 def main() -> int:

@@ -3,6 +3,7 @@
 use mav_connector_sdk::abi::*;
 use mav_connector_sdk::TestDriver;
 use mav_connector_whoop5::{Whoop5Connector, CONNECTOR_ID, GEN5_SERVICE};
+use sha2::{Digest, Sha256};
 use whoop_protocol::{crc16_modbus, crc32, decode_frame, Generation};
 
 fn event(sequence: u64, body: EventBody) -> ConnectorEvent {
@@ -449,4 +450,57 @@ fn unhex(value: &str) -> Vec<u8> {
         .chunks_exact(2)
         .map(|pair| u8::from_str_radix(core::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect()
+}
+
+#[test]
+fn packaged_fixtures_match_native_actions_and_state() {
+    let metadata = mav_connector_whoop5::metadata().unwrap();
+    for fixture in metadata.fixtures.cases {
+        let mut driver = TestDriver::new(Whoop5Connector::default());
+        let mut next = 0;
+        if fixture.initial_state.is_empty() {
+            assert_eq!(
+                driver.init(fixture.events[0].clone()).unwrap(),
+                fixture.expected[0]
+            );
+            next = 1;
+        } else {
+            let mut restore = fixture.events[0].clone();
+            restore.body = EventBody::RestoreState {
+                bytes: fixture.initial_state,
+            };
+            assert!(driver.init(restore).unwrap().actions.is_empty());
+        }
+        for index in next..fixture.events.len() {
+            assert_eq!(
+                driver.drive(fixture.events[index].clone()).unwrap(),
+                fixture.expected[index],
+                "fixture {} action {index}",
+                fixture.name
+            );
+        }
+        assert_eq!(
+            <[u8; 32]>::from(Sha256::digest(driver.snapshot().unwrap())),
+            fixture.expected_state_hash,
+            "fixture {} state",
+            fixture.name
+        );
+    }
+}
+
+#[test]
+fn packaged_parity_covers_history_restart_and_malformed_input() {
+    let names = mav_connector_whoop5::metadata()
+        .unwrap()
+        .fixtures
+        .cases
+        .into_iter()
+        .map(|fixture| fixture.name)
+        .collect::<Vec<_>>();
+    for required in ["history-cursor-retry", "state-restart", "malformed-frame"] {
+        assert!(
+            names.iter().any(|name| name == required),
+            "missing {required}"
+        );
+    }
 }

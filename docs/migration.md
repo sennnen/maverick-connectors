@@ -29,12 +29,13 @@ adjudication.
   temporary.
 - **WC-P8 (complete):** port/adjudicate pure WHOOP reference logic and provenance fixtures; exclude
   desktop, async transport, persistence, FFI, and analytics.
-- **WC-P9 (complete):** standalone WHOOP 4.0 SDK project, externally signed test artifact, eleven
-  packaged fixtures, and install proof through the existing public runtime.
+- **WC-P9 (complete):** standalone WHOOP 4.0 SDK project, externally signed test artifact, expanded
+  by WC-P11 to fourteen parity-profiled fixtures, and install proof through the public runtime.
 - **WC-P10 (complete):** standalone paired WHOOP 5.0/MG SDK project, externally signed test
-  artifact, nine packaged fixtures, and explicit deep-stream uncertainty.
-- **WC-P11:** provide artifact hashes, state traces, native/Wasm parity fixtures, and performance
-  inputs to cross-platform proof.
+  artifact, expanded by WC-P11 to twelve parity-profiled fixtures, and explicit deep-stream
+  uncertainty.
+- **WC-P11 (complete):** frozen artifact/input/action/sample/state hashes, native/Wasm fixture
+  equality, history/restart/malformed traces, and mobile fuel/memory profiles for both artifacts.
 - **WC-P12:** after proof and runtime switch, delete `whoop4/manifest.json`,
   `whoop5/manifest.json`, `tools/validate.py`, old folder-import docs/config, and every compiled-codec
   instruction. Useful facts/tests must already exist in packaged projects.

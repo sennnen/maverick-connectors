@@ -1,0 +1,151 @@
+{
+  "schema": "mavconn-parity/v1",
+  "connector_id": "dev.maverick.whoop4",
+  "connector_version": "1.0.0",
+  "artifact_sha256": "ea7e360add1365a2ca8e1f06bb5631cda25fda93c601bd90b6b6f000a22e4df0",
+  "manifest_sha256": "caebdd41d1fc4e8e78f0cc594c4d51e3c24784be88dc9a916f06e7436256d9e5",
+  "signed_sha256": "fec7bcf65bc3f13b12a14b2b5ee5963d49b793cd86fcab22c627c08f77aa0a85",
+  "fixture_count": 14,
+  "fixtures": [
+    {
+      "name": "activate-gen4-scan",
+      "events": 1,
+      "input_sha256": "3847f4aff37b3f8a6f383e63e0c717d0a7ddff48aa4a6487833c1d0ea4246def",
+      "action_trace_sha256": "b8df60506a6bc56c41174f0c728b239ea2b5342e21485d943241bb90e02ece4c",
+      "sample_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "final_state_sha256": "23f4cf6199313daaf74f5f951f1f4eca4a51275c91821440ec8c6c4b32533ed9",
+      "max_fuel_consumed": 41462,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "real-gen4-v24",
+      "events": 1,
+      "input_sha256": "4d19ef66b3b9e9a5e2f5868b15acd7a2e1f57d407a926cfa02da4c5710d55ba1",
+      "action_trace_sha256": "eb72e9d4ed649ee96f086c5572c8dbacaa598898d77ff07c0162b8559afcf801",
+      "sample_sha256": "58d87a199d302034e9ab952e1a277ac6d5e368863340d4dad1e23428c2f8fb2b",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 89074,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "mapped-gen4-v12",
+      "events": 1,
+      "input_sha256": "a4f1c4b8cb172022d58943fb4cf4889ccba7e7775ca8018d6549bae4f262d54c",
+      "action_trace_sha256": "eb72e9d4ed649ee96f086c5572c8dbacaa598898d77ff07c0162b8559afcf801",
+      "sample_sha256": "58d87a199d302034e9ab952e1a277ac6d5e368863340d4dad1e23428c2f8fb2b",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 89074,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "real-gen4-v25",
+      "events": 1,
+      "input_sha256": "e45e594d2f7184cf0956fe257793b36923e0bfa0c2970d208ab09210ea3fc43d",
+      "action_trace_sha256": "1aeb8522bace84c84e87e116a34acf24addeabfa145a088cc463e692b186eded",
+      "sample_sha256": "067d20e356e4e58c0ff7b91bad235366100472c6583cda9c5bd94b0abdcfbf6a",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 58455,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "mapped-gen4-v5",
+      "events": 1,
+      "input_sha256": "9ba39aba8372cbd614d331ca0081b179472f7448e68ecd16cfb80911d932e12f",
+      "action_trace_sha256": "3df812de5b1b6ac1d0907b346f88ed676ea16fd84c8511064f30c032a129429c",
+      "sample_sha256": "dc639cb5014a42df49143fbace58e42cb68c285a3a34bd4e3de8c8a139f0dfb0",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 58256,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "mapped-gen4-v7",
+      "events": 1,
+      "input_sha256": "e3230fb85ac5f1b563013bd6f262fd2694a190fe0246901e23ab248662caa5eb",
+      "action_trace_sha256": "3df812de5b1b6ac1d0907b346f88ed676ea16fd84c8511064f30c032a129429c",
+      "sample_sha256": "dc639cb5014a42df49143fbace58e42cb68c285a3a34bd4e3de8c8a139f0dfb0",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 58256,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "mapped-gen4-v9",
+      "events": 1,
+      "input_sha256": "de950a86aa0eeb91fc841dc3cee48835346692f815fee665159142b3bf54c7cd",
+      "action_trace_sha256": "3df812de5b1b6ac1d0907b346f88ed676ea16fd84c8511064f30c032a129429c",
+      "sample_sha256": "dc639cb5014a42df49143fbace58e42cb68c285a3a34bd4e3de8c8a139f0dfb0",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 58256,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "standard-heart-rate",
+      "events": 1,
+      "input_sha256": "b5cb19851fc9443e1ecb5716fea877052f6fd5cefa559647ca8603ee1fef0959",
+      "action_trace_sha256": "f72381293682a8eeb74d6521d725c346b30a8bfe08b2d18c6b042ba599a2b80e",
+      "sample_sha256": "ed0c6b2ae5bef0242e0dec6a6d4dec550c3d080794de6a5b03fb147d8833fc46",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 53123,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "custom-realtime",
+      "events": 1,
+      "input_sha256": "a1b5d3373d40d87b1acd5a1ec9494caf4489da081bc28c357a23e0961495f278",
+      "action_trace_sha256": "1a638918d4d7c3ba79f75ac01ff3b3880569a0d32c4abe8a7815b2165634f429",
+      "sample_sha256": "2d3f0c02805058e31f49aaaa5be7c46ce9965c52747d49d4697d692718ca6bb8",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 58526,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "battery-event",
+      "events": 1,
+      "input_sha256": "56c22bcdb7e0c94b5eed947383b3fbdd870a983a4e5a38b6482f44dfa647712b",
+      "action_trace_sha256": "6191a8e9d613eb9cdb74b6d1572a291325ecddfb5d8141c8562d65533764f2f7",
+      "sample_sha256": "002cf02c81aa52c7976f147deec64cc98622a29d2db6316e78eda330aab58dfd",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 49054,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "wrist-event",
+      "events": 1,
+      "input_sha256": "c49111df17493f6e6e29ed844b737d1c80664ec4f3913563ebcf4fd62f55fdb0",
+      "action_trace_sha256": "46e66104828d1c7ded84cc2bfab435fc2c6e10519d1781ad544195112cf35a65",
+      "sample_sha256": "9a549cf29d0d95060154f3ee53669762858973fd15bf2933c77d1e7af4c90d99",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 49054,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "history-cursor-retry",
+      "events": 4,
+      "input_sha256": "20a4c5fae29f73aa2d16cf0027f72c4224c8bf7b38690d8f1888f23d5401b39c",
+      "action_trace_sha256": "10b6883df78391ed0c26f7f203043fb15a559c10dc907e498e5faf74209b42fc",
+      "sample_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "final_state_sha256": "ee5be8be808ace522d7ddb4b1709d67f7965a3eda0144701e4c4cf4812760385",
+      "max_fuel_consumed": 58903,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "state-restart",
+      "events": 1,
+      "input_sha256": "93fd3af4bef7016fdfa06a7ec8481ac2de618519f16d6f631b006caec4c5b809",
+      "action_trace_sha256": "e5efbfe22c42f3e852c27a50ffa3877590cb4e0b5f60d91a04890cea816e32f4",
+      "sample_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "final_state_sha256": "23f4cf6199313daaf74f5f951f1f4eca4a51275c91821440ec8c6c4b32533ed9",
+      "max_fuel_consumed": 41744,
+      "peak_memory_bytes": 1179648
+    },
+    {
+      "name": "malformed-frame",
+      "events": 1,
+      "input_sha256": "105fcf982d43d6abfa99a68a17d69a6f1b1213ed0b3d0fec981264dafcb78673",
+      "action_trace_sha256": "d0420f68eda0ba4493c9c7539f0822983c4818a9f4a9589015dd08999206b49b",
+      "sample_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "final_state_sha256": "9ab96ed29e9327d31ef29f60fb48a3165bf6ce45440a19fc63fbbc88cf10a886",
+      "max_fuel_consumed": 45663,
+      "peak_memory_bytes": 1179648
+    }
+  ]
+}
