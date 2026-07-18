@@ -28,6 +28,7 @@
     "wire_format": "gen5",
     "max_frame_bytes": 8192
   },
+  "codec": "whoop",
   "interval_source": "ppg",
   "commands": [
     { "name": "get_hello", "opcode": 145, "b3": 1, "note": "0x91. First write of the enable handshake; the gen5 hello is its own opcode, unlike the gen4 hello at 0x23." },

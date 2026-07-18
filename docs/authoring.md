@@ -10,7 +10,8 @@ protocol facts these manifests cite are in
 ## The shape of a connector
 
 A connector is a folder named for the device family, holding a `manifest.json` of static facts and,
-only where a device needs logic that a file cannot express, a small codec crate. Adding a device
+only where a device needs logic that a file cannot express, a small codec crate in the core
+repo's `core/connectors/`, named by the manifest's `codec` field (ADR-016). Adding a device
 changes nothing in the core. If it seems to need a core change, that is a gap in the schema, and it
 is fixed by widening the schema in the core repo (with an ADR), not by special-casing the device.
 
@@ -47,7 +48,9 @@ fact, its tag becomes hardware-verified, and that is a change to this repository
 2. Fill in `manifest.json` against the schema in the core's `docs/connectors.md`, tagging each fact
    with the confidence it deserves. Keep it to wire facts; a threshold that belongs to an algorithm
    is not a wire fact and does not go here.
-3. If, and only if, the device needs stateful or learned logic, add a small codec crate for it.
+3. If, and only if, the device needs logic the manifest DSL cannot express, add a
+   `mav-connector-<family>` crate under the core repo's `core/connectors/` (ADR-016), name it
+   in the manifest's `codec` field, and register it in `mav-ffi` and `mav-replay`.
 4. Validate (below), and open a pull request.
 
 ## Validating a manifest

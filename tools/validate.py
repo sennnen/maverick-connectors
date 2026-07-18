@@ -55,22 +55,28 @@ def check(manifest_path: Path) -> list[str]:
             )
 
     # record_versions maps a version byte to an admitted record-decoder id -- a reviewed module in
-    # the core's mav-codec (for example "r20_k18"), not a manifest layout. Historical records route
-    # through those decoders, not through the layout DSL, so the shallow check here only confirms the
-    # value is a non-empty string; the core's `validate_manifests` example checks it against the
-    # actual admitted-decoder list.
+    # the device's codec crate (core/connectors/mav-connector-<family>, ADR-016; for example
+    # "r20_k18"), not a manifest layout. Historical records route through those decoders, not
+    # through the layout DSL, so the shallow check here only confirms the value is a non-empty
+    # string; the core checks it against what the named codec actually admits.
     for version, decoder in m.get("record_versions", {}).items():
         if not isinstance(decoder, str) or not decoder:
             problems.append(
                 f"{manifest_path}: record_versions[{version}] must name a record decoder"
             )
 
-    # event_vocabulary names an admitted event-vocabulary module in the core's mav-codec (for
-    # example "whoop"); the shallow check only confirms the shape, the core's validate_manifests
-    # example checks it against the actual admitted list.
+    # event_vocabulary names an admitted event-vocabulary module in the device's codec crate (for
+    # example "whoop"); the shallow check only confirms the shape, the core checks it against what
+    # the named codec actually admits.
     vocabulary = m.get("event_vocabulary")
     if vocabulary is not None and (not isinstance(vocabulary, str) or not vocabulary):
         problems.append(f"{manifest_path}: event_vocabulary must name a vocabulary")
+
+    # Anything routed through a device codec requires naming one (ADR-016).
+    if (m.get("record_versions") or vocabulary is not None) and not m.get("codec"):
+        problems.append(
+            f"{manifest_path}: record_versions/event_vocabulary require a codec id"
+        )
     return problems
 
 
