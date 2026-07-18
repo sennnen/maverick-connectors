@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["connectors/template"]
+members = ["connectors/template", "crates/whoop-protocol"]
 
 [workspace.package]
 edition = "2021"

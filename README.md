@@ -27,6 +27,7 @@ decision in [ADR-017](https://github.com/sennnen/maverick/blob/main/docs/adr/ADR
 ## Current contents
 
 - `connectors/template/` — exact-version public SDK consumer, native test, Wasm exports, metadata;
+- `crates/whoop-protocol/` — no-std pure framing, control, safe-offload, and record-routing reference;
 - `registry/schema-v1.json` — frozen ABI v1 schema hashes used by external authors;
 - `whoop4/manifest.json` — legacy WHOOP 4.0 manifest, retained as migration evidence.
 - `whoop5/manifest.json` — legacy WHOOP 5.0/MG manifest, retained as migration evidence.
@@ -49,7 +50,8 @@ registry/                   signed metadata/index fixtures; never private signin
 releases/                   digest-addressed .mavconn outputs or release metadata
 ```
 
-WC-P3 froze the workspace/template layout. WHOOP-local source layout freezes in WC-P8.
+WC-P3 froze the workspace/template layout. WC-P8 froze WHOOP-local pure protocol source and its
+[evidence matrix](docs/whoop-protocol-matrix.md); generation connectors land in WC-P9/P10.
 
 ## Security
 

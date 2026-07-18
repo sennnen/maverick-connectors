@@ -97,6 +97,33 @@ def workspace_checks(root: Path) -> list[str]:
     template = root / "connectors" / "template" / "Cargo.toml"
     if not workspace.is_file() or not template.is_file():
         return ["public SDK-consumer workspace or template is missing"]
+    protocol = root / "crates" / "whoop-protocol"
+    protocol_manifest = protocol / "Cargo.toml"
+    protocol_source = protocol / "src" / "lib.rs"
+    if not protocol_manifest.is_file() or not protocol_source.is_file():
+        problems.append("shared WHOOP protocol crate is missing")
+    else:
+        manifest_text = protocol_manifest.read_text()
+        source_text = protocol_source.read_text()
+        if "[dependencies]" in manifest_text:
+            problems.append("shared WHOOP protocol crate must remain dependency-free")
+        if "#![no_std]" not in source_text:
+            problems.append("shared WHOOP protocol crate must remain no_std")
+        forbidden = [
+            "btleplug",
+            "tokio",
+            "rusqlite",
+            "sqlite",
+            "std::fs",
+            "std::net",
+            "std::process",
+            "mav-connector-sdk",
+            "mav-model",
+            "mav-frame",
+        ]
+        for token in forbidden:
+            if token in source_text or token in manifest_text:
+                problems.append(f"shared WHOOP protocol crate contains forbidden boundary {token!r}")
     registry = root / "registry" / "schema-v1.json"
     if not registry.is_file():
         problems.append("ABI v1 schema registry is missing")
