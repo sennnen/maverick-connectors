@@ -76,7 +76,11 @@ artifact_metadata! {
                 "mav_snapshot",
             ].map(str::to_owned).to_vec(),
             required_imports: Vec::new(),
-            wasm_features: Vec::new(),
+            wasm_features: vec![
+                WasmFeature::MutableGlobals,
+                WasmFeature::SignExtension,
+                WasmFeature::BulkMemory,
+            ],
             sdk_version: "0.1.0".to_owned(),
         },
         fixtures: FixtureSet {
@@ -99,7 +103,7 @@ artifact_metadata! {
                     0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
                     0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
                 ],
-                max_fuel: 10_000,
+                max_fuel: 1_000_000,
                 expected_samples: None,
                 expected_diagnostics: None,
             }],
