@@ -1,0 +1,15 @@
+[package]
+name = "mav-connector-template"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mav-connector-sdk = "=0.1.0"
+
+[lints]
+workspace = true

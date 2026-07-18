@@ -24,8 +24,10 @@ whoop4 project       whoop5 project       third-party projects
 
 Connector projects depend only on released public SDK surfaces and portable crates admitted by the
 toolchain. No path dependency reaches a Maverick core crate. Shared device-family source stays here,
-not in Maverick. SDK source may initially be developed in Maverick to freeze host/guest vectors, but
-its consumable release and compatibility policy are public and device-neutral.
+not in Maverick. SDK source is developed with the host ABI in Maverick to freeze host/guest vectors.
+Connector projects consume only its exact public release version. Pre-release validation may
+substitute an explicit checkout through a command-line Cargo patch, but no repository manifest
+stores that path.
 
 ## Artifact ownership
 

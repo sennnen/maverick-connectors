@@ -22,8 +22,9 @@ adjudication.
 
 ## Repository packet ownership
 
-- **WC-P3:** create SDK-consumer workspace, deterministic pack/inspect/validate/test tools, and a
-  device-neutral template. Legacy validator remains temporary.
+- **WC-P3 (complete):** SDK-consumer workspace, deterministic pack/inspect/validate/test tools,
+  frozen schema registry, and a device-neutral native/Wasm template. Legacy validator remains
+  temporary.
 - **WC-P8:** port/adjudicate pure WHOOP reference logic and provenance fixtures; exclude desktop,
   async transport, persistence, FFI, and analytics.
 - **WC-P9:** create standalone WHOOP 4.0 SDK project and signed test artifact.

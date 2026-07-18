@@ -1,7 +1,7 @@
 # Authoring a connector
 
-Status: target workflow. SDK and tools land in WC-P3; until then this is a contract, not runnable
-setup instructions.
+Status: WC-P3 SDK, template, and structural tools implemented. Wasm execution joins `mavconn-test`
+in WC-P4; device migrations and release publishing remain later packets.
 
 ## Workflow
 
@@ -16,13 +16,27 @@ setup instructions.
    samples, diagnostics, state hash, or typed failure.
 5. Add bounded golden fixtures with provenance and confidence. Malformed input, disconnect,
    cancellation, timeout, restart, state corruption, and resource limits are required.
-6. Compile `wasm32-unknown-unknown`, then run `mavconn-test` for native/Wasm parity.
+6. Compile `wasm32-unknown-unknown`, run native SDK tests, and run `mavconn-test`; full native/Wasm
+   execution parity becomes blocking when WC-P4 lands the bounded interpreter.
 7. Package deterministic metadata and fixtures with `mavconn-pack`; sign through an external
    publisher signer; inspect and validate the resulting one-file artifact.
 8. Test installation, update, downgrade refusal, rollback, revocation, and uninstall without either
    mobile frontend.
 9. Publish the exact digest-addressed bytes directly or through a signed registry entry. Publishing
    never changes Maverick.
+
+Before the SDK release is available from its registry, maintainers can validate the exact package
+shape without committing a path dependency:
+
+```text
+python3 tools/validate.py \
+  --sdk-path ../maverick/core/crates/mav-connector-sdk \
+  --tool-dir ../maverick/core/target/debug
+```
+
+The deep gate runs format, Clippy, native tests, two identical release Wasm builds, canonical
+metadata generation, and two identical unsigned package builds. Production finalization is a second
+`mavconn-pack` phase that receives only external signature and public-key bytes.
 
 ## ABI boundary
 

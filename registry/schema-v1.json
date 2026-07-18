@@ -1,0 +1,12 @@
+{
+  "schema": "mavconn-schema-registry/v1",
+  "abi_major": 1,
+  "abi_minor": 0,
+  "sdk_version": "0.1.0",
+  "schemas": {
+    "abi": "b901e5a701e7af5794b74ff5beb05512a1e6fa0e3e76cc7c97dc72f8b66d2ea8",
+    "fixtures": "1daaa3a4ea07e1c130461c61fc9a0e0d8433db60ac56f8b9bbc1073ba9cbf1ff",
+    "manifest": "4ebeb126d4c17eeaccdab69320cb6d085d3b060a3d413c1e3bc8c8362ec7912b",
+    "signature": "be8508dcc5fb1089828ddb7beb9fdcd5303dfaa8a95bf5c4c52f21cd5751587e"
+  }
+}
