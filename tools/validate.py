@@ -64,6 +64,13 @@ def check(manifest_path: Path) -> list[str]:
             problems.append(
                 f"{manifest_path}: record_versions[{version}] must name a record decoder"
             )
+
+    # event_vocabulary names an admitted event-vocabulary module in the core's mav-codec (for
+    # example "whoop"); the shallow check only confirms the shape, the core's validate_manifests
+    # example checks it against the actual admitted list.
+    vocabulary = m.get("event_vocabulary")
+    if vocabulary is not None and (not isinstance(vocabulary, str) or not vocabulary):
+        problems.append(f"{manifest_path}: event_vocabulary must name a vocabulary")
     return problems
 
 
