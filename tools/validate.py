@@ -142,6 +142,34 @@ def workspace_checks(root: Path) -> list[str]:
         for line in manifest.read_text().splitlines():
             if "mav-connector" in line and "path" in line:
                 problems.append(f"{manifest}: connector dependency uses a path")
+    for config_path in sorted(root.glob("connectors/*/package-test.json")):
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            problems.append(f"{config_path}: invalid package-test JSON")
+            continue
+        required = {
+            "schema",
+            "package",
+            "wasm",
+            "publisher_key_id",
+            "public_key_hex",
+            "signed_sha256",
+            "signature_hex",
+            "artifact_sha256",
+        }
+        if set(config) != required or config.get("schema") != "mavconn-package-test/v1":
+            problems.append(f"{config_path}: package-test schema or fields differ")
+            continue
+        for field, length in [
+            ("public_key_hex", 64),
+            ("signed_sha256", 64),
+            ("signature_hex", 128),
+            ("artifact_sha256", 64),
+        ]:
+            value = config[field]
+            if len(value) != length or any(character not in "0123456789abcdef" for character in value):
+                problems.append(f"{config_path}: {field} is not canonical lowercase hex")
     forbidden_suffixes = {".jks", ".p12", ".pfx", ".key", ".pem"}
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() in forbidden_suffixes:
@@ -176,8 +204,17 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
         ],
         root,
     )
-    wasm = root / "target/wasm32-unknown-unknown/release/mav_connector_template.wasm"
-    first_wasm_hash = hashlib.sha256(wasm.read_bytes()).digest()
+    release = root / "target/wasm32-unknown-unknown/release"
+    package_configs = [
+        (path, json.loads(path.read_text()))
+        for path in sorted(root.glob("connectors/*/package-test.json"))
+    ]
+    wasm_paths = [release / "mav_connector_template.wasm"] + [
+        release / config["wasm"] for _, config in package_configs
+    ]
+    first_wasm_hashes = {
+        path: hashlib.sha256(path.read_bytes()).digest() for path in wasm_paths
+    }
     run(
         ["cargo", "build"]
         + resolver
@@ -190,8 +227,9 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
         ],
         root,
     )
-    if hashlib.sha256(wasm.read_bytes()).digest() != first_wasm_hash:
-        raise RuntimeError("repeated template Wasm build is not deterministic")
+    for path, first_hash in first_wasm_hashes.items():
+        if hashlib.sha256(path.read_bytes()).digest() != first_hash:
+            raise RuntimeError(f"repeated Wasm build is not deterministic: {path.name}")
     with tempfile.TemporaryDirectory(prefix="mavconn-p3-") as temporary:
         temp = Path(temporary)
         run(
@@ -212,7 +250,7 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
         pack = tool_dir / "mavconn-pack"
         arguments = [
             "digest",
-            str(wasm),
+            str(release / "mav_connector_template.wasm"),
             str(temp / "manifest.cbor"),
             str(temp / "abi.cbor"),
             str(temp / "fixtures.cbor"),
@@ -221,6 +259,61 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
         second = run([str(pack)] + arguments + [str(unsigned_b)], root)
         if first.stdout != second.stdout or unsigned_a.read_bytes() != unsigned_b.read_bytes():
             raise RuntimeError("repeated unsigned packaging is not deterministic")
+        for config_path, config in package_configs:
+            package_temp = temp / config["package"]
+            package_temp.mkdir()
+            run(
+                ["cargo", "run"]
+                + resolver
+                + [
+                    "-p",
+                    config["package"],
+                    "--bin",
+                    "metadata",
+                    "--",
+                    str(package_temp),
+                ],
+                root,
+            )
+            unsigned = package_temp / "unsigned.wasm"
+            digest = run(
+                [
+                    str(pack),
+                    "digest",
+                    str(release / config["wasm"]),
+                    str(package_temp / "manifest.cbor"),
+                    str(package_temp / "abi.cbor"),
+                    str(package_temp / "fixtures.cbor"),
+                    str(unsigned),
+                ],
+                root,
+            ).stdout.strip()
+            if digest != config["signed_sha256"]:
+                raise RuntimeError(f"{config_path}: signed digest differs")
+            artifact = package_temp / "connector.mavconn"
+            run(
+                [
+                    str(pack),
+                    "finalize",
+                    str(unsigned),
+                    config["publisher_key_id"],
+                    config["public_key_hex"],
+                    config["signature_hex"],
+                    str(artifact),
+                ],
+                root,
+            )
+            artifact_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            if artifact_hash != config["artifact_sha256"]:
+                raise RuntimeError(f"{config_path}: final artifact digest differs")
+            run(
+                [str(tool_dir / "mavconn-validate"), str(artifact), config["public_key_hex"]],
+                root,
+            )
+            run(
+                [str(tool_dir / "mavconn-test"), str(artifact), config["public_key_hex"]],
+                root,
+            )
 
 
 def main() -> int:
