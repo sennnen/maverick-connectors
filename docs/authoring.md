@@ -1,74 +1,75 @@
 # Authoring a connector
 
-A connector teaches Maverick how to talk to one family of device. This document is the practical
-guide for writing one in this repository. The schema itself, and the argument for why connectors are
-shaped this way, lives in the core repo at
-[docs/connectors.md](https://github.com/sennnen/maverick/blob/main/docs/connectors.md); the device
-protocol facts these manifests cite are in
-[docs/protocol/whoop.md](https://github.com/sennnen/maverick/blob/main/docs/protocol/whoop.md).
+Status: target workflow. SDK and tools land in WC-P3; until then this is a contract, not runnable
+setup instructions.
 
-## The shape of a connector
+## Workflow
 
-A connector is a folder named for the device family, holding a `manifest.json` of static facts and,
-only where a device needs logic that a file cannot express, a small codec crate in the core
-repo's `core/connectors/`, named by the manifest's `codec` field (ADR-016). Adding a device
-changes nothing in the core. If it seems to need a core change, that is a gap in the schema, and it
-is fixed by widening the schema in the core repo (with an ADR), not by special-casing the device.
+1. Create a standalone Rust project against released `mav-connector-sdk`; never use a path into
+   Maverick internals.
+2. Declare stable connector/publisher ids, device advertisement rules, services/characteristics,
+   capabilities, ABI/core ranges, state schema, and a host-defined resource profile.
+3. Implement a deterministic state machine: receive normalized events, update private state, return
+   bounded declarative actions. Do not call a radio, OS API, filesystem, network, clock, random
+   source, thread, or process.
+4. Write native unit tests and scripted protocol-state tests before code. Each asserts exact actions,
+   samples, diagnostics, state hash, or typed failure.
+5. Add bounded golden fixtures with provenance and confidence. Malformed input, disconnect,
+   cancellation, timeout, restart, state corruption, and resource limits are required.
+6. Compile `wasm32-unknown-unknown`, then run `mavconn-test` for native/Wasm parity.
+7. Package deterministic metadata and fixtures with `mavconn-pack`; sign through an external
+   publisher signer; inspect and validate the resulting one-file artifact.
+8. Test installation, update, downgrade refusal, rollback, revocation, and uninstall without either
+   mobile frontend.
+9. Publish the exact digest-addressed bytes directly or through a signed registry entry. Publishing
+   never changes Maverick.
 
-The manifest holds everything static: the device identity and the model strings that resolve to it,
-the GATT service and characteristic UUIDs, the frame parameters, the command opcodes, the packet
-map, the field layouts, the unit conversions, the historical record versions, and the enable
-sequence a strap needs before it will stream. What it does not hold is anything that is learned from
-a specific physical device over time, or any stateful decode; those belong in a codec. The standing
-example is the WHOOP 4.0 skin-temperature anchor, which is different for every strap and does not
-exist until the strap has been worn, so it cannot sit in a static file.
+## ABI boundary
 
-If a connector produces beat-to-beat intervals, it also declares `interval_source` as `ppg`, `ecg`,
-or `unknown`. This is not cosmetic: Maverick labels optical output pulse-rate variability and
-reserves heart-rate variability for ECG-derived intervals.
+V1 exports allocation/deallocation, version, initialization, event handling, and state snapshot
+functions. Messages are deterministic CBOR. SDK macros own pointer/length glue; connector authors do
+not hand-roll it. V1 imports nothing from the host.
 
-## Confidence tags
+Events cover lifecycle, advertisements, service discovery, pairing, subscriptions, reads/writes,
+notifications, timers, disconnect/cancellation, state commit, and sample commit. Actions cover only
+declared scan/connect/pair/discover/subscribe/read/write/disconnect operations, opaque timers,
+connector-scoped state, normalized samples, diagnostics, and completion.
 
-Nothing in these manifests has been confirmed against a physical strap yet, so every fact carries a
-tag in its `confidence` or `confidence_note` field, borrowed from the core's protocol ledger:
+Core executes ordered actions. Emit/persist samples before returning a device acknowledgement. A
+connector may implement a protocol retry; core enforces global resource, deadline, cancellation,
+manifest capability, and lifecycle rules.
 
-- **XVAL** — more than one reverse-engineering source agrees.
-- **ONE** — a single source asserts it.
-- **JUDES** / **SERIES** — from one of the two hardware writeups, named where it matters.
-- **PROV** — provisional, uncalibrated, or a reasoned guess.
-- **HW** — can only be confirmed with the physical device.
-- **CONFLICT** — the sources disagree, and it must be settled on hardware.
+## What belongs in connector code
 
-A tag is a promise about how far to trust the line, not decoration. When a real device confirms a
-fact, its tag becomes hardware-verified, and that is a change to this repository, tracked here.
+- advertisement interpretation and identity rules;
+- device UUIDs, packet/framing formats, commands and responses;
+- device-specific handshake/authentication/acknowledgement state;
+- generation and firmware branches supported by evidence;
+- history transfer and protocol-specific retry semantics;
+- connector-local learned protocol state;
+- normalization to SDK sample types and safe diagnostics.
 
-## Adding a device
+Analytics, user health judgments, core storage queries, UI, native BLE objects, acquisition source
+fetching, publisher trust decisions, and resource-policy decisions do not belong here.
 
-1. Copy an existing folder as a starting point, or make a new one named for the family.
-2. Fill in `manifest.json` against the schema in the core's `docs/connectors.md`, tagging each fact
-   with the confidence it deserves. Keep it to wire facts; a threshold that belongs to an algorithm
-   is not a wire fact and does not go here.
-3. If, and only if, the device needs logic the manifest DSL cannot express, add a
-   `mav-connector-<family>` crate under the core repo's `core/connectors/` (ADR-016), name it
-   in the manifest's `codec` field, and register it in `mav-ffi` and `mav-replay`.
-4. Validate (below), and open a pull request.
+## Evidence and tests
 
-## Validating a manifest
+Every protocol fact carries source and confidence. A fact from private reference source may guide
+code/tests but must not be copied wholesale into public docs. Hardware-verified evidence outranks
+older inference only when capture provenance is traceable. Conflicts stay explicit until adjudicated.
 
-Two checks, shallow and deep.
+Packaged self-tests include expected ordered events/actions, normalized samples, final state hash,
+and maximum fuel. Installation tests run in a fresh namespace. Tests must cover invalid lengths,
+sentinels, unknown versions/events, CRC failures, partial frames, duplicate/reordered events,
+timeouts, cancellation, reconnect, and corrupted state.
 
-The shallow one runs here with nothing but a Python interpreter and is what this repository's CI
-uses:
+## Signing and publishing
 
-    python3 tools/validate.py
+Use a dedicated Ed25519 publisher identity. Never reuse Android JKS, Apple distribution identity,
+registry root, or another publisher key. Keep private material outside git and tool output. Rotation
+uses old-key cross-signature or registry-root authorization; revocation records are signed and
+versioned.
 
-It confirms each manifest is well-formed, has the required keys, names a wire format the core
-implements, and has an internally consistent enable sequence.
-
-The deep one is the authoritative check, and it runs the manifest through the core's real schema.
-Check out the core repository alongside this one and run its example tool against this directory:
-
-    cargo run -p mav-codec --example validate_manifests -- ../maverick-connectors
-
-A manifest is correct when both pass and, once there is a capture to test against, when it decodes
-that capture's frames to the samples you expect.
+One `.mavconn` is valid on both platforms. Platform trust differs: iOS may permit only reviewed
+official publishers while Android may allow explicit third-party trust. Do not fork artifacts or ABI
+to accommodate policy.
