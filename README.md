@@ -30,7 +30,10 @@ decision in [ADR-017](https://github.com/sennnen/maverick/blob/main/docs/adr/ADR
 - `connectors/whoop5/` — signed-test WHOOP 5.0/MG connector with twelve parity-profiled fixtures;
 - `crates/whoop-protocol/` — no-std pure framing, control, safe-offload, and record-routing reference;
 - `registry/schema-v1.json` — frozen ABI v1 schema hashes used by external authors;
+- `registry/index-schema-v1.json` — signed discovery, rotation, and revocation schema;
+- `registry/index-v1.json` — deterministic signed test index with public root metadata;
 - `tools/validate.py` — standalone workspace/package checks plus opt-in deep SDK/tool validation.
+- `tools/publish.py` — keyless two-phase digest-addressed registry publication.
 
 ## Target contents
 
@@ -48,7 +51,8 @@ releases/                   digest-addressed .mavconn outputs or release metadat
 
 WC-P3 froze the workspace/template layout. WC-P8 froze WHOOP-local pure protocol source and its
 [evidence matrix](docs/whoop-protocol-matrix.md); WC-P9/P10 delivered the generation connectors,
-WC-P11 froze parity, and WC-P12 removed the legacy JSON path.
+WC-P11 froze parity, WC-P12 removed the legacy JSON path, and WC-P15 added the signed registry and
+[keyless publishing flow](docs/publishing.md).
 
 ## Security
 

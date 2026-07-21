@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maverick.local/schema/connector-registry-index-v1.json",
+  "title": "Maverick connector registry index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "registry_id", "revision", "generated_at_ms", "valid_until_ms",
+    "previous_index_sha256", "revocation_revision", "entries", "revocations", "rotations"
+  ],
+  "properties": {
+    "schema": { "const": "mavconn-registry-index/v1" },
+    "registry_id": { "$ref": "#/$defs/id" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "generated_at_ms": { "type": "integer" },
+    "valid_until_ms": { "type": "integer" },
+    "previous_index_sha256": { "oneOf": [{ "$ref": "#/$defs/hex32" }, { "type": "null" }] },
+    "revocation_revision": { "type": "integer", "minimum": 0 },
+    "entries": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "revocations": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/revocation" }
+    },
+    "rotations": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/rotation" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" },
+    "hex32": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hex64": { "type": "string", "pattern": "^[0-9a-f]{128}$" },
+    "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$" },
+    "abi": {
+      "type": "object", "additionalProperties": false,
+      "required": ["major", "min_minor", "max_minor"],
+      "properties": {
+        "major": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "min_minor": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "max_minor": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
+    },
+    "core": {
+      "type": "object", "additionalProperties": false,
+      "required": ["min_version", "max_version"],
+      "properties": {
+        "min_version": { "$ref": "#/$defs/version" },
+        "max_version": { "oneOf": [{ "$ref": "#/$defs/version" }, { "type": "null" }] }
+      }
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "connector_id", "version", "artifact_sha256", "artifact_url", "artifact_size",
+        "publisher_key_id", "abi", "core", "channel", "supersedes", "revoked"
+      ],
+      "properties": {
+        "connector_id": { "$ref": "#/$defs/id" },
+        "version": { "$ref": "#/$defs/version" },
+        "artifact_sha256": { "$ref": "#/$defs/hex32" },
+        "artifact_url": { "type": "string", "pattern": "^https://", "maxLength": 2048 },
+        "artifact_size": { "type": "integer", "minimum": 1, "maximum": 4194304 },
+        "publisher_key_id": { "$ref": "#/$defs/id" },
+        "abi": { "$ref": "#/$defs/abi" },
+        "core": { "$ref": "#/$defs/core" },
+        "channel": { "$ref": "#/$defs/id" },
+        "supersedes": { "oneOf": [{ "$ref": "#/$defs/version" }, { "type": "null" }] },
+        "revoked": { "type": "boolean" }
+      }
+    },
+    "revocation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["publisher_key_id", "revoked_at_ms", "reason"],
+      "properties": {
+        "publisher_key_id": { "$ref": "#/$defs/id" },
+        "revoked_at_ms": { "type": "integer" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "rotation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["from_key_id", "to_key_id", "to_public_key", "effective_at_ms", "cross_signature"],
+      "properties": {
+        "from_key_id": { "$ref": "#/$defs/id" },
+        "to_key_id": { "$ref": "#/$defs/id" },
+        "to_public_key": { "$ref": "#/$defs/hex32" },
+        "effective_at_ms": { "type": "integer" },
+        "cross_signature": { "$ref": "#/$defs/hex64" }
+      }
+    }
+  }
+}

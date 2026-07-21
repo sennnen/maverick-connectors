@@ -63,6 +63,47 @@ def workspace_checks(root: Path) -> list[str]:
         else:
             if schema_registry.get("schemas") != SCHEMA_HASHES:
                 problems.append("ABI v1 schema registry hashes differ from frozen vectors")
+    registry_paths = {
+        "unsigned": root / "registry" / "index-v1.unsigned.json",
+        "signed": root / "registry" / "index-v1.json",
+        "root": root / "registry" / "root-v1.json",
+        "schema": root / "registry" / "index-schema-v1.json",
+    }
+    if any(not path.is_file() for path in registry_paths.values()):
+        problems.append("signed connector registry vector or schema is missing")
+    else:
+        try:
+            unsigned_index = json.loads(registry_paths["unsigned"].read_text())
+            signed_bytes = registry_paths["signed"].read_bytes()
+            signed_index = json.loads(signed_bytes)
+            registry_root = json.loads(registry_paths["root"].read_text())
+            json.loads(registry_paths["schema"].read_text())
+        except json.JSONDecodeError:
+            problems.append("signed connector registry vector is invalid JSON")
+        else:
+            canonical = json.dumps(signed_index, separators=(",", ":")).encode()
+            if canonical != signed_bytes:
+                problems.append("signed connector registry vector is not canonical compact JSON")
+            if signed_index.get("index") != unsigned_index:
+                problems.append("signed connector registry payload differs from unsigned vector")
+            signature = signed_index.get("signature", {})
+            if signature.get("algorithm") != "Ed25519":
+                problems.append("signed connector registry algorithm differs")
+            if signature.get("key_id") != registry_root.get("key_id"):
+                problems.append("signed connector registry root key id differs")
+            if hashlib.sha256(signed_bytes).hexdigest() != registry_root.get("signed_index_sha256"):
+                problems.append("signed connector registry digest differs from frozen vector")
+            if unsigned_index.get("schema") != "mavconn-registry-index/v1":
+                problems.append("unsigned connector registry schema differs")
+            package_digests = {
+                json.loads(path.read_text())["artifact_sha256"]
+                for path in sorted(root.glob("connectors/*/package-test.json"))
+            }
+            entry_digests = {
+                entry.get("artifact_sha256") for entry in unsigned_index.get("entries", [])
+            }
+            if entry_digests != package_digests:
+                problems.append("signed registry entries differ from packaged connector digests")
     template_text = template.read_text()
     if 'mav-connector-sdk = "=0.1.0"' not in template_text:
         problems.append("template must pin released mav-connector-sdk =0.1.0")
@@ -175,6 +216,35 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
             raise RuntimeError(f"repeated Wasm build is not deterministic: {path.name}")
     with tempfile.TemporaryDirectory(prefix="mavconn-p3-") as temporary:
         temp = Path(temporary)
+        registry_root = json.loads((root / "registry/root-v1.json").read_text())
+        signed_registry = json.loads((root / "registry/index-v1.json").read_text())
+        registry_tool = tool_dir / "mavconn-registry"
+        signing_digest = run(
+            [str(registry_tool), "prepare", str(root / "registry/index-v1.unsigned.json")],
+            root,
+        ).stdout.strip()
+        if signing_digest != registry_root["signing_digest_hex"]:
+            raise RuntimeError("registry signing digest differs from frozen vector")
+        generated_registry = temp / "index-v1.json"
+        run(
+            [
+                str(registry_tool), "finalize",
+                str(root / "registry/index-v1.unsigned.json"),
+                registry_root["key_id"], signed_registry["signature"]["signature"],
+                registry_root["public_key_hex"], str(generated_registry),
+            ],
+            root,
+        )
+        if generated_registry.read_bytes() != (root / "registry/index-v1.json").read_bytes():
+            raise RuntimeError("registry finalization is not byte-deterministic")
+        run(
+            [
+                str(registry_tool), "verify", str(generated_registry),
+                registry_root["registry_id"], registry_root["key_id"],
+                registry_root["public_key_hex"], "1",
+            ],
+            root,
+        )
         run(
             ["cargo", "run"]
             + resolver
@@ -251,6 +321,17 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
                 raise RuntimeError(f"{config_path}: final artifact digest differs")
             run(
                 [str(tool_dir / "mavconn-validate"), str(artifact), config["public_key_hex"]],
+                root,
+            )
+            registry_root = json.loads((root / "registry/root-v1.json").read_text())
+            connector_id = json.loads((config_path.parent / "parity-v1.json").read_text())["connector_id"]
+            run(
+                [
+                    str(tool_dir / "mavconn-registry"), "verify-artifact",
+                    str(root / "registry/index-v1.json"), registry_root["registry_id"],
+                    registry_root["key_id"], registry_root["public_key_hex"], "1",
+                    connector_id, "1.0.0", str(artifact),
+                ],
                 root,
             )
             generated_report = package_temp / "parity-v1.json"

@@ -1,0 +1,9 @@
+{
+  "schema": "mavconn-registry-root/v1",
+  "registry_id": "dev.maverick.connectors",
+  "key_id": "registry-root-v1",
+  "algorithm": "Ed25519",
+  "public_key_hex": "269abd8a0f74012b4436c0066e128dd41b4b0909b11339625aeed764d07673af",
+  "signing_digest_hex": "8dd8c994aa49974d457205f79908d404abb20dba43bafe700842580e3a9b4c74",
+  "signed_index_sha256": "696cf8d6a2abdcf01af0bf8ef69e91390c3c90ebeff12a9a556550e84b4ddf2d"
+}
