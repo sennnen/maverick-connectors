@@ -111,6 +111,7 @@ def workspace_checks(root: Path) -> list[str]:
         for line in manifest.read_text().splitlines():
             if "mav-connector" in line and "path" in line:
                 problems.append(f"{manifest}: connector dependency uses a path")
+    publisher_keys: dict[str, str] = {}
     for config_path in sorted(root.glob("connectors/*/package-test.json")):
         try:
             config = json.loads(config_path.read_text())
@@ -139,6 +140,13 @@ def workspace_checks(root: Path) -> list[str]:
             value = config[field]
             if len(value) != length or any(character not in "0123456789abcdef" for character in value):
                 problems.append(f"{config_path}: {field} is not canonical lowercase hex")
+        publisher_key_id = config["publisher_key_id"]
+        public_key_hex = config["public_key_hex"]
+        prior_key = publisher_keys.setdefault(publisher_key_id, public_key_hex)
+        if prior_key != public_key_hex:
+            problems.append(
+                f"{config_path}: publisher key id {publisher_key_id!r} maps to multiple public keys"
+            )
         parity_path = config_path.parent / "parity-v1.json"
         if not parity_path.is_file():
             problems.append(f"{parity_path}: packaged parity report is missing")

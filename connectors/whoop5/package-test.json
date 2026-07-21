@@ -3,8 +3,8 @@
   "package": "mav-connector-whoop5",
   "wasm": "mav_connector_whoop5.wasm",
   "publisher_key_id": "maverick-whoop-test",
-  "public_key_hex": "6aa31efccd2e36f3021f8e691dd839f57032875bdeaba0a2908b2942b92a5d4f",
+  "public_key_hex": "dfef1d92a685c9df623b8a321740b0a59de0de538bbfea9ddb703394a1e0f5bd",
   "signed_sha256": "9df89b44d587c87f5873edae6ed25bfdccd98a55434866277e7289910b91e4db",
-  "signature_hex": "2b6a145621e29fed66bdea2ed4732aa85b89f870ddc27336870830384c70fcacb93a13943a0bf230bf570c3f340e309317cf8c3602ca53b41601a667b897580c",
-  "artifact_sha256": "7829241ae70b256eb84ab70a9b8a5eac44512009fcf15aba5967cb35df94221d"
+  "signature_hex": "503a34dd4d23b4cfcbab3caaee019b7807ee7329cd1afb93b455a0a6a45b6ab9f447798beba215c1a1137f892f62dc9e77ecda8f5e60b7759d03b6cc493c4409",
+  "artifact_sha256": "3c4c013f6c593c411fb822e65b8c363a6524dbf759390c10781a8bae695cfd47"
 }

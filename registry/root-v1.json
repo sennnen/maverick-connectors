@@ -3,7 +3,7 @@
   "registry_id": "dev.maverick.connectors",
   "key_id": "registry-root-v1",
   "algorithm": "Ed25519",
-  "public_key_hex": "269abd8a0f74012b4436c0066e128dd41b4b0909b11339625aeed764d07673af",
-  "signing_digest_hex": "8dd8c994aa49974d457205f79908d404abb20dba43bafe700842580e3a9b4c74",
-  "signed_index_sha256": "696cf8d6a2abdcf01af0bf8ef69e91390c3c90ebeff12a9a556550e84b4ddf2d"
+  "public_key_hex": "84167d0a028be2cf2759ec87199f7ecf40f2819e8a7a547d2b7e338c31d1fbbb",
+  "signing_digest_hex": "65256ef2dcddec6c09a9928632025bb26c420422cb30a93a99143a7f50381395",
+  "signed_index_sha256": "7eb408a9a7d6b24056a257cfbb025fa35c5b0f551daa489bf7d9890f3fb9935e"
 }

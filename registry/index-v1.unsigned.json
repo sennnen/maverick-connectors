@@ -10,8 +10,8 @@
     {
       "connector_id": "dev.maverick.whoop4",
       "version": "1.0.0",
-      "artifact_sha256": "ea7e360add1365a2ca8e1f06bb5631cda25fda93c601bd90b6b6f000a22e4df0",
-      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-ea7e360add1365a2ca8e1f06bb5631cda25fda93c601bd90b6b6f000a22e4df0.mavconn",
+      "artifact_sha256": "3158072c210ff18a510e044192a28b781669a276cab6279ed0ae58dfef23c72d",
+      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-3158072c210ff18a510e044192a28b781669a276cab6279ed0ae58dfef23c72d.mavconn",
       "artifact_size": 199893,
       "publisher_key_id": "maverick-whoop-test",
       "abi": { "major": 1, "min_minor": 0, "max_minor": 0 },
@@ -23,8 +23,8 @@
     {
       "connector_id": "dev.maverick.whoop5",
       "version": "1.0.0",
-      "artifact_sha256": "7829241ae70b256eb84ab70a9b8a5eac44512009fcf15aba5967cb35df94221d",
-      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-7829241ae70b256eb84ab70a9b8a5eac44512009fcf15aba5967cb35df94221d.mavconn",
+      "artifact_sha256": "3c4c013f6c593c411fb822e65b8c363a6524dbf759390c10781a8bae695cfd47",
+      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-3c4c013f6c593c411fb822e65b8c363a6524dbf759390c10781a8bae695cfd47.mavconn",
       "artifact_size": 245042,
       "publisher_key_id": "maverick-whoop-test",
       "abi": { "major": 1, "min_minor": 0, "max_minor": 0 },
