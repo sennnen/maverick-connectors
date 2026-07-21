@@ -5,10 +5,9 @@ Target format is one signed `.mavconn` file: a valid WebAssembly module containi
 manifest, ABI, fixture, and signature custom sections. Identical bytes run through Maverick's shared
 Rust interpreter on iOS, Android, replay, and tests.
 
-This repository is private. It now contains the public-SDK consumer workspace, deterministic
-device-neutral template, schema registry, and local deep validation path from WC-P3 alongside the
-legacy JSON manifests. Runtime and authoritative tools live in Maverick; packaged device connectors
-remain migration work. The executable migration is
+This repository is private. It contains the public-SDK consumer workspace, deterministic
+device-neutral template, schema registry, local deep validation path, and the two packaged device
+connector projects. Runtime and authoritative tools live in Maverick. The executable migration is
 [docs/migration.md](docs/migration.md); target source/release architecture is
 [docs/architecture.md](docs/architecture.md). Core contracts and security model live in
 [`sennnen/maverick`](https://github.com/sennnen/maverick/blob/main/docs/connectors.md), with the
@@ -31,12 +30,7 @@ decision in [ADR-017](https://github.com/sennnen/maverick/blob/main/docs/adr/ADR
 - `connectors/whoop5/` — signed-test WHOOP 5.0/MG connector with twelve parity-profiled fixtures;
 - `crates/whoop-protocol/` — no-std pure framing, control, safe-offload, and record-routing reference;
 - `registry/schema-v1.json` — frozen ABI v1 schema hashes used by external authors;
-- `whoop4/manifest.json` — legacy WHOOP 4.0 manifest, retained as migration evidence.
-- `whoop5/manifest.json` — legacy WHOOP 5.0/MG manifest, retained as migration evidence.
-- `tools/validate.py` — shallow standalone checks plus opt-in deep SDK/tool checkout validation.
-
-These are not installable plugin artifacts and do not prove the target architecture. WC-P12 deletes
-them after both packaged connectors pass native-versus-Wasm parity and the active runtime switches.
+- `tools/validate.py` — standalone workspace/package checks plus opt-in deep SDK/tool validation.
 
 ## Target contents
 
@@ -53,7 +47,8 @@ releases/                   digest-addressed .mavconn outputs or release metadat
 ```
 
 WC-P3 froze the workspace/template layout. WC-P8 froze WHOOP-local pure protocol source and its
-[evidence matrix](docs/whoop-protocol-matrix.md); generation connectors land in WC-P9/P10.
+[evidence matrix](docs/whoop-protocol-matrix.md); WC-P9/P10 delivered the generation connectors,
+WC-P11 froze parity, and WC-P12 removed the legacy JSON path.
 
 ## Security
 
