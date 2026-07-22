@@ -93,11 +93,16 @@ fn decode_realtime(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     Ok(samples)
 }
 
+/// The on-wrist marker the strap stamps on every biometric record at inner `[2]`. Two sources pin
+/// `0x80` as worn.
+const ON_WRIST_MARKER: u8 = 0x80;
+
 fn decode_record(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     let decoder = classify_record(Generation::Gen5, payload).map_err(|_| DecodeError::Truncated)?;
-    let [_, version, _, body @ ..] = payload else {
+    let [_, version, marker, body @ ..] = payload else {
         return Err(DecodeError::Truncated);
     };
+    let marker = *marker;
     match decoder {
         RecordDecoder::Gen5V18 => decode_v18(body),
         RecordDecoder::Gen5V20 => decode_v20(body),
@@ -106,6 +111,22 @@ fn decode_record(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
         RecordDecoder::Unmapped(_) => Err(DecodeError::UnmappedRecord(*version)),
         _ => Err(DecodeError::UnmappedRecord(*version)),
     }
+    .map(|mut samples| {
+        // Wear state is otherwise only an edge event (cmd 9/10), so a strap already on the wrist
+        // when the session opens never reports itself as worn — the app said "off wrist" while it
+        // was being worn and streaming heart rate. Every biometric record carries the marker, so
+        // read it from there and get a continuous signal.
+        //
+        // Only the worn marker is claimed. The other values are not pinned by any source, and
+        // asserting "off" from a byte nobody has confirmed is how the wrong answer got shown in the
+        // first place; unknown stays absent, and the host's freshness window handles staleness.
+        if marker == ON_WRIST_MARKER {
+            if let Some(time_ms) = samples.first().and_then(|first| first.device_time_ms) {
+                samples.push(sample("wrist-state", 1_000_000, time_ms, 0, "boolean"));
+            }
+        }
+        samples
+    })
 }
 
 fn decode_v18(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {

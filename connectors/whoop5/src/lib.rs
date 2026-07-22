@@ -450,13 +450,13 @@ impl Whoop5Connector {
                 let seq = self.take_command_seq();
                 let command = whoop_protocol::set_config(seq, "enable_raw_data_w_ecg", b'2')
                     .map_err(protocol_error)?;
-                self.write(event, command)
+                self.probe_write(event, command, "SET_CONFIG enable_raw_data_w_ecg=2")
             }
             #[cfg(feature = "ecg-probe")]
             ECG_START_STEP => {
                 self.config_step += 1;
                 let command = self.command(whoop_protocol::START_RAW_DATA, &[])?;
-                self.write(event, command)
+                self.probe_write(event, command, "START_RAW_DATA(81)")
             }
             // The oracle opens the raw stream and immediately kicks a history offload, noting that
             // type-43 "rides that window". Reproduced here, because the raw stream produced nothing
@@ -466,7 +466,11 @@ impl Whoop5Connector {
                 self.config_step += 1;
                 let seq = self.take_command_seq();
                 let command = request_history(Generation::Gen5, seq).map_err(protocol_error)?;
-                self.write(event, command)
+                self.probe_write(
+                    event,
+                    command,
+                    "SEND_HISTORICAL_DATA(22) to open the window",
+                )
             }
             _ => {
                 self.phase = Phase::Streaming;
@@ -539,7 +543,25 @@ impl Whoop5Connector {
         payload: &[u8],
     ) -> Result<ActionBatch, ConnectorError> {
         let time_ms = event.wall_time_ms;
-        match decode_response(Generation::Gen5, payload).map_err(protocol_error)? {
+        #[cfg(feature = "ecg-probe")]
+        let announced = {
+            let status = match decode_control(Generation::Gen5, payload) {
+                Ok(Some(Control::Response {
+                    to_opcode, result, ..
+                })) => format!("opcode {to_opcode} → {result:?}"),
+                _ => "unparsed".to_owned(),
+            };
+            self.diagnostic(
+                event,
+                DiagnosticLevel::Info,
+                "whoop5-probe-response",
+                &format!("{status} · {}", probe_hex(payload)),
+            )?
+        };
+        #[cfg(not(feature = "ecg-probe"))]
+        let announced = empty();
+        let mut batch = announced;
+        let decoded = match decode_response(Generation::Gen5, payload).map_err(protocol_error)? {
             CommandResponse::Battery { deci_percent } if deci_percent <= 1000 => {
                 let Some(time_ms) = time_ms else {
                     return Ok(empty());
@@ -573,27 +595,10 @@ impl Whoop5Connector {
                 "whoop5-data-range",
                 &format!("banked history spans {oldest:?}..{newest:?}"),
             ),
-            #[cfg(feature = "ecg-probe")]
-            CommandResponse::Unmapped { to_opcode } => {
-                // The reply to START_RAW_DATA lands here. Whether the strap accepted, refused, or
-                // ignored it is the single most useful fact in the probe, and without this it was
-                // silently discarded.
-                let status = match decode_control(Generation::Gen5, payload) {
-                    Ok(Some(Control::Response { result, .. })) => format!("{result:?}"),
-                    _ => "no status".to_owned(),
-                };
-                self.diagnostic(
-                    event,
-                    DiagnosticLevel::Info,
-                    "whoop5-probe-response",
-                    &format!(
-                        "response to opcode {to_opcode}: {status} · {}",
-                        probe_hex(payload)
-                    ),
-                )
-            }
             _ => Ok(empty()),
-        }
+        }?;
+        batch.actions.extend(decoded.actions);
+        Ok(batch)
     }
 
     /// Console frames carry firmware log text behind a ten-byte record header. They are surfaced as
@@ -771,6 +776,25 @@ impl Whoop5Connector {
         } else {
             self.actions(event, bodies)
         }
+    }
+
+    /// A probe write, announced. Without this the journal cannot distinguish "the strap ignored
+    /// the command" from "the command was never sent", and those need completely different fixes.
+    #[cfg(feature = "ecg-probe")]
+    fn probe_write(
+        &mut self,
+        event: &ConnectorEvent,
+        bytes: Vec<u8>,
+        what: &str,
+    ) -> Result<ActionBatch, ConnectorError> {
+        let mut batch = self.diagnostic(
+            event,
+            DiagnosticLevel::Info,
+            "whoop5-probe-step",
+            &format!("sending {what} · {}", probe_hex(&bytes)),
+        )?;
+        batch.actions.extend(self.write(event, bytes)?.actions);
+        Ok(batch)
     }
 
     fn write(
@@ -1334,12 +1358,14 @@ fn record_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
         wire_sample("activity-class", 0, time_v18, 0, "code"),
         wire_sample("sleep-state-raw", 0, time_v18, 0, "code"),
         wire_sample("signal-quality", 255_000_000, time_v18, 0, "percent"),
+        // The worn marker the record carries at inner [2]; the real capture has 0x80 there.
+        wire_sample("wrist-state", 1_000_000, time_v18, 0, "boolean"),
     ];
     let ppg_values = [
         292, 306, 463, 553, 9, -1550, -1952, -1503, -1082, -791, -343, -346, -352, -313, -162,
         -133, 100, 102, 252, 344, 327, 460, 291, -902,
     ];
-    let v26_samples = ppg_values
+    let mut v26_samples: Vec<WireSample> = ppg_values
         .into_iter()
         .enumerate()
         .map(|(sequence, value)| {
@@ -1352,6 +1378,13 @@ fn record_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
             )
         })
         .collect();
+    v26_samples.push(wire_sample(
+        "wrist-state",
+        1_000_000,
+        1_783_955_687_000,
+        0,
+        "boolean",
+    ));
 
     let mut v20_payload = vec![0u8; 2_027];
     v20_payload[0] = 47;

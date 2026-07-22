@@ -16,7 +16,14 @@ fn real_v18_metrics_and_v26_ppg_replay_exactly() {
     let v18 = include_str!("../../../crates/whoop-protocol/tests/fixtures/whoop_rs_gen5_v18.hex");
     let payload = decode_frame(Generation::Gen5, &unhex(v18.trim())).unwrap();
     let samples = decode_payload(&payload).unwrap();
-    assert_eq!(samples.len(), 11);
+    // Twelve, not eleven: every worn biometric record now also reports the wear marker it carries
+    // at inner [2]. The real capture has 0x80 there, which is what makes this assertion evidence
+    // rather than assumption.
+    assert_eq!(samples.len(), 12);
+    let wear = samples.last().expect("wear marker");
+    assert_eq!(wear.stream, "wrist-state");
+    assert_eq!(wear.value_microunits, 1_000_000);
+    assert_eq!(wear.unit, "boolean");
     assert_eq!(samples[0].stream, "heart-rate");
     assert_eq!(samples[0].value_microunits, 102_000_000);
     assert_eq!(samples[1].value_microunits, 602_000_000);
@@ -29,9 +36,14 @@ fn real_v18_metrics_and_v26_ppg_replay_exactly() {
     let v26 = include_str!("../../../crates/whoop-protocol/tests/fixtures/whoop_rs_gen5_v26.hex");
     let payload = decode_frame(Generation::Gen5, &unhex(v26.trim())).unwrap();
     let samples = decode_payload(&payload).unwrap();
-    assert_eq!(samples.len(), 24);
-    assert!(samples.iter().all(|sample| sample.stream == "ppg"));
-    assert!(samples.iter().any(|sample| sample.value_microunits < 0));
+    // 24 PPG values plus the wear marker this record also carries.
+    assert_eq!(samples.len(), 25);
+    assert_eq!(samples.last().expect("wear marker").stream, "wrist-state");
+    assert!(samples.iter().take(24).all(|sample| sample.stream == "ppg"));
+    assert!(samples
+        .iter()
+        .take(24)
+        .any(|sample| sample.value_microunits < 0));
 }
 
 #[test]
