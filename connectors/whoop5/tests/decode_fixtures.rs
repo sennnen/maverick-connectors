@@ -22,7 +22,7 @@ fn real_v18_metrics_and_v26_ppg_replay_exactly() {
     assert_eq!(samples[1].value_microunits, 602_000_000);
     assert_eq!(samples[2].value_microunits, 613_000_000);
     assert_eq!(samples[6].stream, "skin-temp");
-    assert_eq!(samples[6].value_microunits, 3_057_000_000);
+    assert_eq!(samples[6].value_microunits, 30_570_000);
     assert_eq!(samples[7].stream, "step-count");
     assert_eq!(samples[10].stream, "signal-quality");
 

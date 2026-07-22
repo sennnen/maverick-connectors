@@ -22,6 +22,10 @@ const DATA_SECONDARY_ID: &str = "data-secondary";
 const ALL_SUBSCRIPTIONS: u8 = 0x1f;
 const IDLE_TIMER: TimerToken = TimerToken(200);
 const RESPONSE_TIMER: TimerToken = TimerToken(201);
+const IDLE_DELAY_MS: u64 = 60_000;
+/// A live sample newer than this keeps the link reserved for streaming, so the periodic offload
+/// deadline is pushed out instead of preempting realtime notifications.
+const LIVE_ACTIVE_MS: i64 = 10_000;
 const SNAPSHOT_LEN: usize = 17;
 const FEATURE_FLAGS: [&str; 10] = [
     "enable_r22_packets",
@@ -62,6 +66,9 @@ pub struct Whoop5Connector {
     history_retries: u8,
     config_step: u8,
     paired: bool,
+    /// Wall time of the newest live sample. Session-local; deliberately absent from the snapshot so
+    /// the state schema and every frozen fixture hash stay unchanged.
+    last_live_ms: Option<i64>,
 }
 
 impl Default for Whoop5Connector {
@@ -74,6 +81,7 @@ impl Default for Whoop5Connector {
             history_retries: 0,
             config_step: 0,
             paired: false,
+            last_live_ms: None,
         }
     }
 }
@@ -210,6 +218,15 @@ impl Connector for Whoop5Connector {
                 bytes,
             } => self.notification(&event, characteristic_id, bytes),
             EventBody::TimerFired { token } if *token == IDLE_TIMER => {
+                if self.live_is_active(event.wall_time_ms) {
+                    return self.actions(
+                        &event,
+                        vec![ActionBody::SetTimer {
+                            token: IDLE_TIMER,
+                            delay_ms: IDLE_DELAY_MS,
+                        }],
+                    );
+                }
                 self.phase = Phase::Historical;
                 self.history_retries = 0;
                 let seq = self.take_command_seq();
@@ -219,11 +236,19 @@ impl Connector for Whoop5Connector {
             EventBody::TimerFired { token } if *token == RESPONSE_TIMER => {
                 if self.phase != Phase::Historical || self.history_retries >= 1 {
                     self.phase = Phase::Streaming;
-                    return self.diagnostic(
+                    return self.actions(
                         &event,
-                        DiagnosticLevel::Warning,
-                        "whoop5-history-timeout",
-                        "historical response timed out",
+                        vec![
+                            ActionBody::EmitDiagnostic {
+                                level: DiagnosticLevel::Warning,
+                                code: "whoop5-history-timeout".to_owned(),
+                                message: "historical response timed out".to_owned(),
+                            },
+                            ActionBody::SetTimer {
+                                token: IDLE_TIMER,
+                                delay_ms: IDLE_DELAY_MS,
+                            },
+                        ],
                     );
                 }
                 self.history_retries += 1;
@@ -301,16 +326,25 @@ impl Whoop5Connector {
         match self.config_step {
             0 => {
                 self.config_step = 1;
-                let command = self.command(117, &[])?;
+                // Opcode 3 is toggle_realtime_hr. Sent with an empty body it toggles nothing, so
+                // the strap never starts packet-40 REALTIME_DATA and the only heart rate the host
+                // ever sees arrives in the 60-second historical offload. The explicit enable byte
+                // follows opcode 63's on/off convention.
+                let command = self.command(3, &[1])?;
                 self.write(event, command)
             }
             1 => {
                 self.config_step = 2;
+                let command = self.command(117, &[])?;
+                self.write(event, command)
+            }
+            2 => {
+                self.config_step = 3;
                 let command = self.command(118, &[])?;
                 self.write(event, command)
             }
-            2..=11 => {
-                let index = usize::from(self.config_step - 2);
+            3..=12 => {
+                let index = usize::from(self.config_step - 3);
                 let body = feature_flag_body(FEATURE_FLAGS[index])?;
                 self.config_step += 1;
                 let command = self.command(120, &body)?;
@@ -330,7 +364,7 @@ impl Whoop5Connector {
                         },
                         ActionBody::SetTimer {
                             token: IDLE_TIMER,
-                            delay_ms: 60_000,
+                            delay_ms: IDLE_DELAY_MS,
                         },
                     ],
                 )
@@ -348,7 +382,8 @@ impl Whoop5Connector {
             let wall = event.wall_time_ms.ok_or_else(|| {
                 ConnectorError::InvalidWire("standard heart-rate event has no wall time".to_owned())
             })?;
-            return self.emit_or_diagnose(event, decode_standard_heart_rate(bytes, wall));
+            self.last_live_ms = Some(wall);
+            return self.emit_or_diagnose(event, decode_standard_heart_rate(bytes, wall), false);
         }
         let payload = match decode_frame(Generation::Gen5, bytes) {
             Ok(payload) => payload,
@@ -363,7 +398,13 @@ impl Whoop5Connector {
         };
         match decode_control(&payload).map_err(protocol_error)? {
             Some(control) => self.control(event, control),
-            None => self.emit_or_diagnose(event, decode_payload(&payload)),
+            None => {
+                let refresh_deadline = self.phase == Phase::Historical;
+                if !refresh_deadline {
+                    self.last_live_ms = event.wall_time_ms;
+                }
+                self.emit_or_diagnose(event, decode_payload(&payload), refresh_deadline)
+            }
         }
     }
 
@@ -389,7 +430,13 @@ impl Whoop5Connector {
             }
             | Control::MetadataStart { .. } => {
                 self.phase = Phase::Historical;
-                Ok(empty())
+                self.actions(
+                    event,
+                    vec![ActionBody::SetTimer {
+                        token: RESPONSE_TIMER,
+                        delay_ms: 5_000,
+                    }],
+                )
             }
             Control::MetadataEnd { cursor, .. } => {
                 let seq = self.take_command_seq();
@@ -400,10 +447,15 @@ impl Whoop5Connector {
                 self.phase = Phase::Streaming;
                 self.actions(
                     event,
-                    vec![ActionBody::SetTimer {
-                        token: IDLE_TIMER,
-                        delay_ms: 60_000,
-                    }],
+                    vec![
+                        ActionBody::CancelTimer {
+                            token: RESPONSE_TIMER,
+                        },
+                        ActionBody::SetTimer {
+                            token: IDLE_TIMER,
+                            delay_ms: IDLE_DELAY_MS,
+                        },
+                    ],
                 )
             }
             Control::Response { .. } | Control::MetadataUnknown { .. } => Ok(empty()),
@@ -414,26 +466,33 @@ impl Whoop5Connector {
         &mut self,
         event: &ConnectorEvent,
         decoded: Result<Vec<WireSample>, decode::DecodeError>,
+        refresh_deadline: bool,
     ) -> Result<ActionBatch, ConnectorError> {
+        let mut bodies = Vec::new();
+        if refresh_deadline {
+            bodies.push(ActionBody::SetTimer {
+                token: RESPONSE_TIMER,
+                delay_ms: 5_000,
+            });
+        }
         match decoded {
-            Ok(samples) if samples.is_empty() => Ok(empty()),
-            Ok(samples) => {
-                let bodies = samples
-                    .chunks(MAX_SAMPLES_PER_ACTION)
-                    .enumerate()
-                    .map(|(index, chunk)| ActionBody::EmitSamples {
-                        batch_id: BatchId(self.next_operation.saturating_add(index as u64)),
-                        samples: chunk.to_vec(),
-                    })
-                    .collect();
-                self.actions(event, bodies)
-            }
-            Err(error) => self.diagnostic(
-                event,
-                DiagnosticLevel::Warning,
-                "whoop5-decode",
-                &format!("WHOOP 5.0/MG payload rejected: {error:?}"),
-            ),
+            Ok(samples) if samples.is_empty() => {}
+            Ok(samples) => bodies.extend(samples.chunks(MAX_SAMPLES_PER_ACTION).enumerate().map(
+                |(index, chunk)| ActionBody::EmitSamples {
+                    batch_id: BatchId(self.next_operation.saturating_add(index as u64)),
+                    samples: chunk.to_vec(),
+                },
+            )),
+            Err(error) => bodies.push(ActionBody::EmitDiagnostic {
+                level: DiagnosticLevel::Warning,
+                code: "whoop5-decode".to_owned(),
+                message: format!("WHOOP 5.0/MG payload rejected: {error:?}"),
+            }),
+        }
+        if bodies.is_empty() {
+            Ok(empty())
+        } else {
+            self.actions(event, bodies)
         }
     }
 
@@ -493,6 +552,14 @@ impl Whoop5Connector {
     fn command(&mut self, opcode: u8, body: &[u8]) -> Result<Vec<u8>, ConnectorError> {
         let seq = self.take_command_seq();
         build_command(Generation::Gen5, seq, opcode, body).map_err(protocol_error)
+    }
+
+    /// True when realtime notifications are still arriving, which defers historical offload.
+    fn live_is_active(&self, now_ms: Option<i64>) -> bool {
+        match (now_ms, self.last_live_ms) {
+            (Some(now), Some(last)) => now.saturating_sub(last) < LIVE_ACTIVE_MS,
+            _ => false,
+        }
     }
 
     fn take_command_seq(&mut self) -> u8 {
@@ -645,11 +712,11 @@ fn manifest() -> Result<Manifest, ConnectorError> {
     Ok(Manifest {
         schema: MANIFEST_SCHEMA.to_owned(),
         connector_id: ConnectorId::new(CONNECTOR_ID)?,
-        version: "1.0.0".to_owned(),
+        version: "1.0.5".to_owned(),
         display_name: "WHOOP 5.0 / MG".to_owned(),
         description: "Local WHOOP 5.0/MG connector; deep availability remains unverified"
             .to_owned(),
-        publisher_key_id: "maverick-whoop-test".to_owned(),
+        publisher_key_id: "maverick-whoop-live-test".to_owned(),
         abi: AbiRange {
             major: 1,
             min_minor: 0,
@@ -960,7 +1027,7 @@ fn record_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
         wire_sample("gravity", -725_173, time_v18, 0, "milli-g"),
         wire_sample("gravity", 494_417, time_v18, 1, "milli-g"),
         wire_sample("gravity", 496_855, time_v18, 2, "milli-g"),
-        wire_sample("skin-temp", 3_057_000_000, time_v18, 0, "degrees-celsius"),
+        wire_sample("skin-temp", 30_570_000, time_v18, 0, "degrees-celsius"),
         wire_sample("step-count", 50_000_000, time_v18, 0, "count"),
         wire_sample("activity-class", 0, time_v18, 0, "code"),
         wire_sample("sleep-state-raw", 0, time_v18, 0, "code"),

@@ -216,7 +216,11 @@ fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
     let ActionBody::Write { bytes, .. } = &query[0] else {
         panic!("query write");
     };
-    assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 117);
+    assert_eq!(
+        decode_frame(Generation::Gen5, bytes).unwrap(),
+        [0x23, 2, 3, 1],
+        "toggle_realtime_hr must carry the enable byte or live streaming never starts"
+    );
 
     let next = bodies(
         driver
@@ -232,7 +236,7 @@ fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
     let ActionBody::Write { bytes, .. } = &next[0] else {
         panic!("next write");
     };
-    assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 118);
+    assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 117);
 
     let flag = bodies(
         driver
@@ -249,10 +253,27 @@ fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
         panic!("flag write");
     };
     let payload = decode_frame(Generation::Gen5, bytes).unwrap();
+    assert_eq!(payload[2], 118);
+
+    let first_flag = bodies(
+        driver
+            .drive(event(
+                14,
+                EventBody::WriteResult {
+                    operation_id: OperationId(13),
+                    characteristic_id: "command".to_owned(),
+                },
+            ))
+            .unwrap(),
+    );
+    let ActionBody::Write { bytes, .. } = &first_flag[0] else {
+        panic!("first feature flag write");
+    };
+    let payload = decode_frame(Generation::Gen5, bytes).unwrap();
     assert_eq!(payload[2], 120);
     assert_eq!(&payload[3..21], b"enable_r22_packets");
 
-    for sequence in 14..=22 {
+    for sequence in 15..=23 {
         let batch = bodies(
             driver
                 .drive(event(
@@ -272,9 +293,9 @@ fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
     let completed = bodies(
         driver
             .drive(event(
-                23,
+                24,
                 EventBody::WriteResult {
-                    operation_id: OperationId(23),
+                    operation_id: OperationId(24),
                     characteristic_id: "command".to_owned(),
                 },
             ))
@@ -414,6 +435,126 @@ fn history_idle_response_cursor_ack_and_timeout_are_safe() {
 }
 
 #[test]
+fn long_historical_transfer_extends_the_response_deadline_instead_of_restarting() {
+    let streaming_state = vec![0x57, 0x35, 1, 7, 0x1f, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 12, 1];
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    driver
+        .drive(event(
+            1,
+            EventBody::RestoreState {
+                bytes: streaming_state,
+            },
+        ))
+        .unwrap();
+    driver
+        .drive(event(
+            2,
+            EventBody::TimerFired {
+                token: TimerToken(200),
+            },
+        ))
+        .unwrap();
+    driver
+        .drive(event(
+            3,
+            EventBody::Notification {
+                characteristic_id: "command-response".to_owned(),
+                bytes: gen5_frame(&[0x24, 1, 34, 1]),
+            },
+        ))
+        .unwrap();
+
+    // MetadataStart marks the transfer as begun; it must re-arm the response deadline rather
+    // than leaving the original 5s window from the initial request as the only chance to reply.
+    let started = bodies(
+        driver
+            .drive(event(
+                4,
+                EventBody::Notification {
+                    characteristic_id: "command-response".to_owned(),
+                    bytes: gen5_frame(&[0x31, 2, 1]),
+                },
+            ))
+            .unwrap(),
+    );
+    assert_eq!(
+        started,
+        vec![ActionBody::SetTimer {
+            token: TimerToken(201),
+            delay_ms: 5_000,
+        }]
+    );
+
+    // A record notification arriving mid-transfer must also refresh the deadline: a deep-buffer
+    // dump routinely runs past the original 5s window, and without a refresh here the connector
+    // would treat that as a dropped response and fire a duplicate SEND_HISTORICAL_DATA (opcode
+    // 22) into an in-progress transfer, restarting/duplicating the burst.
+    let mut record = vec![0u8; 20];
+    record[0] = 47;
+    record[1] = 18;
+    let emitted = bodies(
+        driver
+            .drive(event(
+                5,
+                EventBody::Notification {
+                    characteristic_id: "data".to_owned(),
+                    bytes: gen5_frame(&record),
+                },
+            ))
+            .unwrap(),
+    );
+    assert!(matches!(
+        emitted.first(),
+        Some(ActionBody::SetTimer {
+            token: TimerToken(201),
+            delay_ms: 5_000,
+        })
+    ));
+
+    // With the deadline refreshed by real progress, the response timer must not fire a
+    // duplicate/restarting retry here in real usage; this only asserts the refresh action
+    // shape above, since the discrete-event driver has no wall-clock of its own.
+
+    // Once the transfer completes, the leftover response timer must be cancelled so it cannot
+    // spuriously fire a bogus "historical response timed out" diagnostic after we are already
+    // back in Streaming.
+    let history_end =
+        unhex("aa011c00010023d1319102b949596a705d3b000000fdba010010000000000000f269faec");
+    driver
+        .drive(event(
+            6,
+            EventBody::Notification {
+                characteristic_id: "data".to_owned(),
+                bytes: history_end,
+            },
+        ))
+        .unwrap();
+    let completed = bodies(
+        driver
+            .drive(event(
+                7,
+                EventBody::Notification {
+                    characteristic_id: "command-response".to_owned(),
+                    bytes: gen5_frame(&[0x31, 3, 3]),
+                },
+            ))
+            .unwrap(),
+    );
+    assert_eq!(
+        completed,
+        vec![
+            ActionBody::CancelTimer {
+                token: TimerToken(201),
+            },
+            ActionBody::SetTimer {
+                token: TimerToken(200),
+                delay_ms: 60_000,
+            },
+        ]
+    );
+}
+
+#[test]
 fn deep_imu_notification_splits_at_the_abi_sample_bound() {
     let mut payload = vec![0u8; 1_232];
     payload[0] = 47;
@@ -503,4 +644,65 @@ fn packaged_parity_covers_history_restart_and_malformed_input() {
             "missing {required}"
         );
     }
+}
+
+#[test]
+fn live_streaming_defers_historical_offload_instead_of_preempting_it() {
+    let streaming_state = vec![0x57, 0x35, 1, 7, 0x1f, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 12, 1];
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    driver
+        .drive(event(
+            1,
+            EventBody::RestoreState {
+                bytes: streaming_state,
+            },
+        ))
+        .unwrap();
+
+    let mut live = event(
+        2,
+        EventBody::Notification {
+            characteristic_id: "standard-heart-rate".to_owned(),
+            bytes: vec![0x10, 64, 0x33, 0x03],
+        },
+    );
+    live.wall_time_ms = Some(1_780_000_000_000);
+    assert!(matches!(
+        bodies(driver.drive(live).unwrap()).as_slice(),
+        [ActionBody::EmitSamples { .. }]
+    ));
+
+    // Idle deadline lands one second after a live sample: offload must stand down and re-arm.
+    let mut fired = event(
+        3,
+        EventBody::TimerFired {
+            token: TimerToken(200),
+        },
+    );
+    fired.wall_time_ms = Some(1_780_000_001_000);
+    assert_eq!(
+        bodies(driver.drive(fired).unwrap()),
+        vec![ActionBody::SetTimer {
+            token: TimerToken(200),
+            delay_ms: 60_000,
+        }],
+        "live streaming must defer offload, not issue GET_DATA_RANGE"
+    );
+
+    // After a real gap the offload proceeds exactly as before.
+    let mut stale = event(
+        4,
+        EventBody::TimerFired {
+            token: TimerToken(200),
+        },
+    );
+    stale.wall_time_ms = Some(1_780_000_060_000);
+    let range = bodies(driver.drive(stale).unwrap());
+    let ActionBody::Write { bytes, .. } = &range[0] else {
+        panic!("expected GET_DATA_RANGE after live data stops");
+    };
+    assert_eq!(
+        decode_frame(Generation::Gen5, bytes).unwrap(),
+        [0x23, 1, 34, 0]
+    );
 }

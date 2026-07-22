@@ -308,9 +308,19 @@ fn history_requests_retry_and_ack_cursor_without_force_trim() {
             ))
             .unwrap(),
     );
+    // A record arriving mid-transfer must refresh the response deadline: a deep-buffer dump can
+    // easily outrun the original 5s window, and without a refresh here the connector would treat
+    // that as a dropped response and fire a duplicate SEND_HISTORICAL_DATA into an in-progress
+    // transfer, restarting/duplicating the burst.
     assert!(matches!(
         emitted.as_slice(),
-        [ActionBody::EmitSamples { .. }]
+        [
+            ActionBody::SetTimer {
+                token: TimerToken(101),
+                delay_ms: 5_000,
+            },
+            ActionBody::EmitSamples { .. },
+        ]
     ));
 
     let cursor = [1, 2, 3, 4, 5, 6, 7, 8];

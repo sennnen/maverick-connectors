@@ -13,7 +13,11 @@ pub fn decode_payload(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
         return Err(DecodeError::Truncated);
     };
     match packet_type {
-        40 | 16 => decode_realtime(payload),
+        // Packet 40 only. R22_REALTIME (16) is a different shape entirely — battery is a direct u8
+        // and HR is a u16 of milli-bpm over ten — and no source pins its offsets, so decoding it
+        // with the packet-40 layout published wrong heart rates. It fails closed until a capture
+        // pins the fields.
+        40 => decode_realtime(payload),
         47 => decode_record(payload),
         48 => decode_event(payload),
         36 | 49 => Ok(Vec::new()),
@@ -137,9 +141,11 @@ fn decode_v18(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     }
     let skin_temp = u16_le(body, 62);
     if (500..4500).contains(&skin_temp) {
+        // The gate is centi-degrees (5.00..45.00 C), so the raw scales by 10_000, not 1_000_000.
+        // At 1_000_000 the v18 capture published 3057 degrees Celsius instead of 30.57.
         samples.push(sample(
             "skin-temp",
-            i64::from(skin_temp) * 1_000_000,
+            i64::from(skin_temp) * 10_000,
             time_ms,
             0,
             "degrees-celsius",
