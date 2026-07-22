@@ -92,3 +92,32 @@ fn realtime_events_and_malformed_records_are_explicit() {
     assert!(decode_payload(&[47, 27, 0x80, 0]).is_err());
     assert!(decode_payload(&[48, 0, 3]).is_err());
 }
+
+/// A realtime burst carries one interval per beat since the last packet, not four. The four-slot
+/// cap belongs to the historical record layout; applying it here silently discards beats and
+/// biases every variability metric computed from them.
+#[test]
+fn a_realtime_burst_emits_every_rr_slot_it_declares() {
+    let mut payload = vec![0u8; 24];
+    payload[0] = 40;
+    payload[2..6].copy_from_slice(&1_780_000_000u32.to_le_bytes());
+    payload[8] = 61;
+    payload[9] = 6;
+    for slot in 0..6u16 {
+        let at = 10 + usize::from(slot) * 2;
+        payload[at..at + 2].copy_from_slice(&(800 + slot * 10).to_le_bytes());
+    }
+
+    let samples = decode_payload(&payload).unwrap();
+    let rr = samples
+        .iter()
+        .filter(|sample| sample.stream == "rr-interval")
+        .collect::<Vec<_>>();
+    assert_eq!(rr.len(), 6, "every declared slot must reach the pipeline");
+    assert_eq!(rr[0].value_microunits, 800_000_000);
+    assert_eq!(rr[5].value_microunits, 850_000_000);
+    assert_eq!(
+        rr.iter().map(|sample| sample.sequence).collect::<Vec<_>>(),
+        vec![0, 1, 2, 3, 4, 5]
+    );
+}

@@ -2,8 +2,17 @@
 
 extern crate alloc;
 
+mod deframe;
+mod response;
+
 use alloc::vec;
 use alloc::vec::Vec;
+
+pub use deframe::Deframer;
+pub use response::{
+    decode_battery_event, decode_response, refused_opcodes, BatteryEvent, CommandResponse,
+    DESTRUCTIVE, GATED,
+};
 
 const START_OF_FRAME: u8 = 0xaa;
 const MAX_FRAME_BYTES: usize = 8192;
@@ -27,6 +36,14 @@ impl Generation {
             Self::Gen5 => 8,
         }
     }
+
+    /// Offset of the little-endian declared length within the envelope header.
+    const fn length_offset(self) -> usize {
+        match self {
+            Self::Gen4 => 1,
+            Self::Gen5 => 2,
+        }
+    }
 }
 
 /// Stable failures produced by the pure protocol boundary.
@@ -42,12 +59,14 @@ pub enum ProtocolError {
     ForbiddenCommand,
 }
 
-/// Result byte carried by a command response.
+/// Result byte carried by a command response. Gen4 places no status on a fixed offset, so its
+/// responses report `Unreported` rather than inventing a code from whichever byte sits there.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlResult {
     Ok,
     Pending,
     Unknown(u8),
+    Unreported,
 }
 
 /// Adjudicated control facts used by historical offload.
@@ -145,10 +164,8 @@ pub fn decode_frame(generation: Generation, wire: &[u8]) -> Result<Vec<u8>, Prot
         return Err(ProtocolError::InvalidStart);
     }
 
-    let declared = match generation {
-        Generation::Gen4 => usize::from(u16::from_le_bytes([wire[1], wire[2]])),
-        Generation::Gen5 => usize::from(u16::from_le_bytes([wire[2], wire[3]])),
-    };
+    let offset = generation.length_offset();
+    let declared = usize::from(u16::from_le_bytes([wire[offset], wire[offset + 1]]));
     if declared < TRAILER_BYTES {
         return Err(ProtocolError::InvalidLength);
     }
@@ -191,15 +208,42 @@ pub fn decode_frame(generation: Generation, wire: &[u8]) -> Result<Vec<u8>, Prot
 }
 
 /// Wrap one inner command in a complete outbound frame.
+///
+/// Two tiers of opcode never come through here: the destructive ones (trim, DFU) are refused
+/// outright, and the persistent-state writes are refused on this general path and reachable only
+/// through a builder that names what it writes.
 pub fn build_command(
     generation: Generation,
     seq: u8,
     opcode: u8,
     body: &[u8],
 ) -> Result<Vec<u8>, ProtocolError> {
-    if opcode == 25 {
+    if response::refused(opcode) {
         return Err(ProtocolError::ForbiddenCommand);
     }
+    build_command_unchecked(generation, seq, opcode, body)
+}
+
+/// Build a SET_CONFIG write for one named feature flag: the `0x01` config prefix, the NUL-padded
+/// 32-byte name, the ASCII value, and seven trailing zeros. Gen5 only; this is the one gated
+/// opcode a connector legitimately sends, and it is reversible.
+pub fn set_config(seq: u8, name: &str, value: u8) -> Result<Vec<u8>, ProtocolError> {
+    if name.len() > 32 || !name.is_ascii() {
+        return Err(ProtocolError::InvalidLength);
+    }
+    let mut body = [0u8; 41];
+    body[0] = 1;
+    body[1..1 + name.len()].copy_from_slice(name.as_bytes());
+    body[33] = value;
+    build_command_unchecked(Generation::Gen5, seq, 120, &body)
+}
+
+fn build_command_unchecked(
+    generation: Generation,
+    seq: u8,
+    opcode: u8,
+    body: &[u8],
+) -> Result<Vec<u8>, ProtocolError> {
     let body_len = 3usize
         .checked_add(body.len())
         .ok_or(ProtocolError::Oversized)?;
@@ -209,57 +253,64 @@ pub fn build_command(
     build_frame(generation, &payload)
 }
 
-/// Build GET_DATA_RANGE. The leading zero is confirmed for gen5 and absent from gen4's manifest.
+/// Build GET_DATA_RANGE. Both generations carry the zero argument byte.
 pub fn get_data_range(generation: Generation, seq: u8) -> Result<Vec<u8>, ProtocolError> {
-    match generation {
-        Generation::Gen4 => build_command(generation, seq, 34, &[]),
-        Generation::Gen5 => build_command(generation, seq, 34, &[0]),
-    }
+    build_command(generation, seq, 34, &[0])
 }
 
 /// Build SEND_HISTORICAL_DATA without exposing the destructive FORCE_TRIM opcode.
 pub fn request_history(generation: Generation, seq: u8) -> Result<Vec<u8>, ProtocolError> {
-    match generation {
-        Generation::Gen4 => build_command(generation, seq, 22, &[]),
-        Generation::Gen5 => build_command(generation, seq, 22, &[0]),
-    }
+    build_command(generation, seq, 22, &[0])
 }
 
-/// Echo the eight-byte HISTORY_END cursor, prefixed by gen5's acknowledged revision byte.
+/// Echo the eight-byte HISTORY_END cursor behind the acknowledged-revision byte. Echoing the whole
+/// metadata body instead would hand the strap a record timestamp as a cursor.
 pub fn history_ack(
     generation: Generation,
     seq: u8,
     cursor: [u8; 8],
 ) -> Result<Vec<u8>, ProtocolError> {
-    match generation {
-        Generation::Gen4 => build_command(generation, seq, 23, &cursor),
-        Generation::Gen5 => {
-            let mut body = [0u8; 9];
-            body[0] = 1;
-            body[1..].copy_from_slice(&cursor);
-            build_command(generation, seq, 23, &body)
-        }
-    }
+    let mut body = [0u8; 9];
+    body[0] = 1;
+    body[1..].copy_from_slice(&cursor);
+    build_command(generation, seq, 23, &body)
 }
 
 /// Decode a command response or offload metadata packet. Data packets return `None`.
-pub fn decode_control(payload: &[u8]) -> Result<Option<Control>, ProtocolError> {
+///
+/// The response status forks by generation: gen5 carries it at inner byte 4, one past the
+/// reserved byte, and gen4 carries no status on any fixed offset.
+pub fn decode_control(
+    generation: Generation,
+    payload: &[u8],
+) -> Result<Option<Control>, ProtocolError> {
     let Some(&packet_type) = payload.first() else {
         return Err(ProtocolError::Truncated);
     };
     match packet_type {
         COMMAND_RESPONSE => {
-            let [_, origin_seq, to_opcode, result, ..] = payload else {
-                return Err(ProtocolError::Truncated);
-            };
-            let result = match *result {
-                1 => ControlResult::Ok,
-                2 => ControlResult::Pending,
-                other => ControlResult::Unknown(other),
+            let (origin_seq, to_opcode, result) = match generation {
+                Generation::Gen4 => {
+                    let [_, origin_seq, to_opcode, ..] = payload else {
+                        return Err(ProtocolError::Truncated);
+                    };
+                    (*origin_seq, *to_opcode, ControlResult::Unreported)
+                }
+                Generation::Gen5 => {
+                    let [_, origin_seq, to_opcode, _reserved, result, ..] = payload else {
+                        return Err(ProtocolError::Truncated);
+                    };
+                    let result = match *result {
+                        1 => ControlResult::Ok,
+                        2 => ControlResult::Pending,
+                        other => ControlResult::Unknown(other),
+                    };
+                    (*origin_seq, *to_opcode, result)
+                }
             };
             Ok(Some(Control::Response {
-                origin_seq: *origin_seq,
-                to_opcode: *to_opcode,
+                origin_seq,
+                to_opcode,
                 result,
             }))
         }
@@ -299,6 +350,12 @@ pub fn classify_record(
     if *packet_type != HISTORICAL_DATA {
         return Err(ProtocolError::NotHistoricalRecord);
     }
+    // The gen5 IMU deep buffer is identified by its length and its two in-packet sample counts, not
+    // by its version byte, so a version-byte collision cannot hide it. Tried first: no shorter
+    // record can pass the gate.
+    if matches!(generation, Generation::Gen5) && is_gen5_imu_buffer(payload) {
+        return Ok(RecordDecoder::Gen5V21);
+    }
     Ok(match (generation, *version) {
         (Generation::Gen4, 5 | 7 | 9) => RecordDecoder::Gen4V5,
         (Generation::Gen4, 12 | 24) => RecordDecoder::Gen4V24,
@@ -309,6 +366,23 @@ pub fn classify_record(
         (Generation::Gen5, 26) => RecordDecoder::Gen5V26,
         (_, other) => RecordDecoder::Unmapped(other),
     })
+}
+
+/// The v21 IMU structural gate: both in-packet sample counts read 100 and the buffer is long enough
+/// to hold the six 100-sample axes they promise.
+fn is_gen5_imu_buffer(payload: &[u8]) -> bool {
+    const IMU_SAMPLES: u16 = 100;
+    const COUNT_A: usize = 16;
+    const COUNT_B: usize = 622;
+    const MIN_LEN: usize = 1232;
+    let count = |at: usize| {
+        payload
+            .get(at..at + 2)
+            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+    };
+    payload.len() >= MIN_LEN
+        && count(COUNT_A) == Some(IMU_SAMPLES)
+        && count(COUNT_B) == Some(IMU_SAMPLES)
 }
 
 fn build_frame(generation: Generation, payload: &[u8]) -> Result<Vec<u8>, ProtocolError> {

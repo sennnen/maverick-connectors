@@ -89,7 +89,7 @@ fn decode_realtime(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             "beats-per-minute",
         ));
     }
-    push_rr(&mut samples, payload, 9, 10, time_ms);
+    push_rr(&mut samples, payload, 9, 10, time_ms, u8::MAX);
     Ok(samples)
 }
 
@@ -123,7 +123,7 @@ fn decode_v18(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             "beats-per-minute",
         ));
     }
-    push_rr(&mut samples, body, 12, 13, time_ms);
+    push_rr(&mut samples, body, 12, 13, time_ms, 4);
     let gravity = [f32_le(body, 34), f32_le(body, 38), f32_le(body, 42)];
     if gravity_is_plausible(gravity) {
         for (sequence, value) in gravity.into_iter().enumerate() {
@@ -305,14 +305,17 @@ fn decode_event(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     }
 }
 
+/// `max_slots` is a layout fact, not a protocol one: the historical records reserve four slots,
+/// while a realtime burst carries as many intervals as elapsed since the last one.
 fn push_rr(
     samples: &mut Vec<WireSample>,
     bytes: &[u8],
     count_at: usize,
     first_at: usize,
     time_ms: i64,
+    max_slots: u8,
 ) {
-    let count = bytes.get(count_at).copied().unwrap_or(0).min(4);
+    let count = bytes.get(count_at).copied().unwrap_or(0).min(max_slots);
     let mut sequence = 0;
     for slot in 0..usize::from(count) {
         let at = first_at + slot * 2;

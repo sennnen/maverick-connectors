@@ -74,13 +74,9 @@ fn real_v24_record_replays_all_admitted_values() {
     );
     assert_eq!(
         samples[8],
-        sample(
-            "skin-temp",
-            861_000_000,
-            1_780_928_574_000,
-            0,
-            "degrees-celsius"
-        )
+        // 861 in counts, not 861 degrees: 4.0 publishes the thermistor register, not a
+        // calibrated temperature.
+        sample("skin-temp-raw", 861_000_000, 1_780_928_574_000, 0, "counts")
     );
     assert_eq!(
         samples[9],

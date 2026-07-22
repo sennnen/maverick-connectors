@@ -191,7 +191,8 @@ fn subscriptions_then_gen4_hello_are_ordered() {
     assert!(*confirmed);
     assert_eq!(
         whoop_protocol::decode_frame(whoop_protocol::Generation::Gen4, bytes).unwrap(),
-        [0x23, 1, 35]
+        // The nine-byte client-time argument is what makes the 4.0 answer at all.
+        [0x23, 1, 35, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     );
 }
 
@@ -265,7 +266,7 @@ fn history_requests_retry_and_ack_cursor_without_force_trim() {
     };
     assert_eq!(
         decode_frame(Generation::Gen4, bytes).unwrap(),
-        [0x23, 2, 34]
+        [0x23, 2, 34, 0]
     );
     assert!(matches!(
         range[1],
@@ -292,7 +293,7 @@ fn history_requests_retry_and_ack_cursor_without_force_trim() {
     };
     assert_eq!(
         decode_frame(Generation::Gen4, bytes).unwrap(),
-        [0x23, 3, 22]
+        [0x23, 3, 22, 0]
     );
 
     let record =
@@ -343,7 +344,7 @@ fn history_requests_retry_and_ack_cursor_without_force_trim() {
     };
     assert_eq!(
         decode_frame(Generation::Gen4, bytes).unwrap(),
-        [0x23, 4, 23, 1, 2, 3, 4, 5, 6, 7, 8]
+        [0x23, 4, 23, 1, 1, 2, 3, 4, 5, 6, 7, 8]
     );
 
     let timeout = bodies(
@@ -415,10 +416,59 @@ fn packaged_parity_covers_history_restart_and_malformed_input() {
         .into_iter()
         .map(|fixture| fixture.name)
         .collect::<Vec<_>>();
-    for required in ["history-cursor-retry", "state-restart", "malformed-frame"] {
+    for required in [
+        "history-cursor-retry",
+        "state-restart",
+        "malformed-frame",
+        "frame-split-across-notifications",
+        "frames-packed-in-one-notification",
+    ] {
         assert!(
             names.iter().any(|name| name == required),
             "missing {required}"
         );
     }
+}
+
+/// BLE fragment boundaries are not frame boundaries. A 4.0 record delivered in twenty-byte
+/// notifications must yield exactly the samples the whole frame yields.
+#[test]
+fn a_frame_delivered_in_fragments_matches_the_whole_frame() {
+    let wire = unhex(
+        include_str!("../../../crates/whoop-protocol/tests/fixtures/whoop_rs_gen4_v24.hex").trim(),
+    );
+
+    let mut whole = TestDriver::new(Whoop4Connector::default());
+    let expected = bodies(
+        whole
+            .drive(event(
+                1,
+                EventBody::Notification {
+                    characteristic_id: "data".to_owned(),
+                    bytes: wire.clone(),
+                },
+            ))
+            .unwrap(),
+    );
+    assert!(
+        matches!(expected.as_slice(), [ActionBody::EmitSamples { .. }]),
+        "whole-frame baseline must emit samples"
+    );
+
+    let mut fragmented = TestDriver::new(Whoop4Connector::default());
+    let mut emitted = Vec::new();
+    for (index, chunk) in wire.chunks(20).enumerate() {
+        emitted.extend(bodies(
+            fragmented
+                .drive(event(
+                    index as u64 + 1,
+                    EventBody::Notification {
+                        characteristic_id: "data".to_owned(),
+                        bytes: chunk.to_vec(),
+                    },
+                ))
+                .unwrap(),
+        ));
+    }
+    assert_eq!(emitted, expected);
 }

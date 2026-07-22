@@ -1,0 +1,10 @@
+# The maverick commit this repository builds its SDK and packaging tools from.
+#
+# CI checks out maverick at exactly this SHA, builds mav-connector-sdk and mav-connector-tool from
+# it, and runs the deep validation path against them. Pinning is the point: an unpinned checkout
+# means a connector that passed CI yesterday can fail today for a reason nobody changed here, and a
+# floating SDK means the artifacts this repo signs were built against something nobody recorded.
+#
+# Bumping it is a deliberate commit: change the SHA, run the full local validation against that
+# checkout, and say in the commit message what in maverick made the bump necessary.
+705b87ce1fba4daa3e7fb4a769defed116877fab

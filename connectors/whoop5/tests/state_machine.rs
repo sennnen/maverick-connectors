@@ -185,7 +185,7 @@ fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
             .drive(event(
                 10,
                 EventBody::Subscribed {
-                    characteristic_id: "data-secondary".to_owned(),
+                    characteristic_id: "console".to_owned(),
                 },
             ))
             .unwrap(),
@@ -269,11 +269,17 @@ fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
     let ActionBody::Write { bytes, .. } = &first_flag[0] else {
         panic!("first feature flag write");
     };
+    // SET_CONFIG body: 0x01 prefix, 32-byte NUL-padded name, ASCII value, seven zeros.
     let payload = decode_frame(Generation::Gen5, bytes).unwrap();
     assert_eq!(payload[2], 120);
-    assert_eq!(&payload[3..21], b"enable_r22_packets");
+    let mut expected_body = vec![0u8; 41];
+    expected_body[0] = 1;
+    expected_body[1..19].copy_from_slice(b"enable_r22_packets");
+    expected_body[33] = b'2';
+    assert_eq!(&payload[3..44], expected_body.as_slice());
 
-    for sequence in 15..=23 {
+    // Sixteen flags in total: fifteen more after the first.
+    for sequence in 15..=29 {
         let batch = bodies(
             driver
                 .drive(event(
@@ -288,14 +294,21 @@ fn confirmed_hello_and_r22_configuration_are_ordered_without_unlock_claim() {
         let ActionBody::Write { bytes, .. } = &batch[0] else {
             panic!("remaining feature flag write");
         };
-        assert_eq!(decode_frame(Generation::Gen5, bytes).unwrap()[2], 120);
+        let payload = decode_frame(Generation::Gen5, bytes).unwrap();
+        assert_eq!(payload[2], 120);
+        assert_eq!(payload[3], 1, "config prefix");
+        assert!(
+            matches!(payload[36], b'1' | b'2'),
+            "flag value must be an ASCII digit, got {:#04x}",
+            payload[36]
+        );
     }
     let completed = bodies(
         driver
             .drive(event(
-                24,
+                30,
                 EventBody::WriteResult {
-                    operation_id: OperationId(24),
+                    operation_id: OperationId(30),
                     characteristic_id: "command".to_owned(),
                 },
             ))
@@ -384,7 +397,7 @@ fn history_idle_response_cursor_ack_and_timeout_are_safe() {
                 3,
                 EventBody::Notification {
                     characteristic_id: "command-response".to_owned(),
-                    bytes: gen5_frame(&[0x24, 1, 34, 1]),
+                    bytes: gen5_frame(&[0x24, 1, 34, 0, 1]),
                 },
             ))
             .unwrap(),
@@ -459,7 +472,7 @@ fn long_historical_transfer_extends_the_response_deadline_instead_of_restarting(
             3,
             EventBody::Notification {
                 characteristic_id: "command-response".to_owned(),
-                bytes: gen5_frame(&[0x24, 1, 34, 1]),
+                bytes: gen5_frame(&[0x24, 1, 34, 0, 1]),
             },
         ))
         .unwrap();
@@ -554,8 +567,9 @@ fn long_historical_transfer_extends_the_response_deadline_instead_of_restarting(
     );
 }
 
-#[test]
-fn deep_imu_notification_splits_at_the_abi_sample_bound() {
+/// A v21 deep buffer: 1,240 bytes on the wire, five times the largest ATT payload a phone
+/// negotiates.
+fn deep_imu_frame() -> Vec<u8> {
     let mut payload = vec![0u8; 1_232];
     payload[0] = 47;
     payload[1] = 21;
@@ -563,18 +577,31 @@ fn deep_imu_notification_splits_at_the_abi_sample_bound() {
     body[4..8].copy_from_slice(&1_780_000_000u32.to_le_bytes());
     body[13..15].copy_from_slice(&100u16.to_le_bytes());
     body[619..621].copy_from_slice(&100u16.to_le_bytes());
-    let mut driver = TestDriver::new(Whoop5Connector::default());
-    let emitted = bodies(
+    gen5_frame(&payload)
+}
+
+fn notify(
+    driver: &mut TestDriver<Whoop5Connector>,
+    sequence: u64,
+    bytes: Vec<u8>,
+) -> Vec<ActionBody> {
+    bodies(
         driver
             .drive(event(
-                1,
+                sequence,
                 EventBody::Notification {
                     characteristic_id: "data".to_owned(),
-                    bytes: gen5_frame(&payload),
+                    bytes,
                 },
             ))
             .unwrap(),
-    );
+    )
+}
+
+#[test]
+fn deep_imu_notification_splits_at_the_abi_sample_bound() {
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    let emitted = notify(&mut driver, 1, deep_imu_frame());
     let [ActionBody::EmitSamples { samples: first, .. }, ActionBody::EmitSamples {
         samples: second, ..
     }] = emitted.as_slice()
@@ -583,6 +610,67 @@ fn deep_imu_notification_splits_at_the_abi_sample_bound() {
     };
     assert_eq!(first.len(), MAX_SAMPLES_PER_ACTION);
     assert_eq!(second.len(), 600 - MAX_SAMPLES_PER_ACTION);
+}
+
+/// BLE fragment boundaries are not frame boundaries. A frame delivered twenty bytes at a time
+/// must yield exactly the samples the whole frame yields, and nothing before it is complete.
+#[test]
+fn a_frame_delivered_in_fragments_matches_the_whole_frame() {
+    let frame = deep_imu_frame();
+    let mut whole = TestDriver::new(Whoop5Connector::default());
+    let expected = notify(&mut whole, 1, frame.clone());
+
+    let mut fragmented = TestDriver::new(Whoop5Connector::default());
+    let mut emitted = Vec::new();
+    let last = frame.len().div_ceil(20);
+    for (index, chunk) in frame.chunks(20).enumerate() {
+        let actions = notify(&mut fragmented, index as u64 + 1, chunk.to_vec());
+        if index + 1 < last {
+            assert!(actions.is_empty(), "fragment {index} emitted early");
+        }
+        emitted.extend(actions);
+    }
+    assert_eq!(emitted, expected);
+}
+
+/// Two frames packed into a single notification both decode; neither is lost to the other.
+#[test]
+fn frames_packed_into_one_notification_both_decode() {
+    let frame = deep_imu_frame();
+    let mut packed = frame.clone();
+    packed.extend_from_slice(&frame);
+
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    let emitted = notify(&mut driver, 1, packed);
+    let counts = emitted
+        .iter()
+        .map(|body| match body {
+            ActionBody::EmitSamples { samples, .. } => samples.len(),
+            other => panic!("unexpected action {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        counts,
+        vec![
+            MAX_SAMPLES_PER_ACTION,
+            600 - MAX_SAMPLES_PER_ACTION,
+            MAX_SAMPLES_PER_ACTION,
+            600 - MAX_SAMPLES_PER_ACTION,
+        ]
+    );
+}
+
+/// A partial frame must not survive a reconnect: the tail of the old frame would splice onto
+/// the head of a new one.
+#[test]
+fn a_partial_frame_is_dropped_on_reconnect() {
+    let frame = deep_imu_frame();
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    assert!(notify(&mut driver, 1, frame[..600].to_vec()).is_empty());
+    driver.drive(event(2, EventBody::Resume)).unwrap();
+    // The stale tail alone decodes to nothing; the buffer was cleared.
+    assert!(notify(&mut driver, 3, frame[600..].to_vec()).is_empty());
+    assert_eq!(notify(&mut driver, 4, frame).len(), 2);
 }
 
 fn unhex(value: &str) -> Vec<u8> {
@@ -638,7 +726,13 @@ fn packaged_parity_covers_history_restart_and_malformed_input() {
         .into_iter()
         .map(|fixture| fixture.name)
         .collect::<Vec<_>>();
-    for required in ["history-cursor-retry", "state-restart", "malformed-frame"] {
+    for required in [
+        "history-cursor-retry",
+        "state-restart",
+        "malformed-frame",
+        "frame-split-across-notifications",
+        "frames-packed-in-one-notification",
+    ] {
         assert!(
             names.iter().any(|name| name == required),
             "missing {required}"
@@ -705,4 +799,35 @@ fn live_streaming_defers_historical_offload_instead_of_preempting_it() {
         decode_frame(Generation::Gen5, bytes).unwrap(),
         [0x23, 1, 34, 0]
     );
+}
+
+/// The console channel carries firmware log text, not measurements. Routing it through the record
+/// decoder would invent samples out of ASCII.
+#[test]
+fn console_frames_become_diagnostics_and_never_samples() {
+    let mut payload = vec![0u8; 10];
+    payload.extend_from_slice(b"RTC timestamp invalid; not saving\n");
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    let emitted = bodies(
+        driver
+            .drive(event(
+                1,
+                EventBody::Notification {
+                    characteristic_id: "console".to_owned(),
+                    bytes: gen5_frame(&payload),
+                },
+            ))
+            .unwrap(),
+    );
+    let [ActionBody::EmitDiagnostic {
+        level,
+        code,
+        message,
+    }] = emitted.as_slice()
+    else {
+        panic!("console must produce exactly one diagnostic: {emitted:?}");
+    };
+    assert_eq!(*level, DiagnosticLevel::Info);
+    assert_eq!(code, "whoop5-console");
+    assert_eq!(message, "RTC timestamp invalid; not saving\n");
 }

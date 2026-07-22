@@ -10,4 +10,55 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 tools/validate.py
+        with:
+          path: connectors
+
+      - name: read the pinned maverick ref
+        id: pin
+        run: |
+          sha=$(grep -v '^#' connectors/MAVERICK_REF | tr -d '[:space:]')
+          test -n "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sennnen/maverick
+          ref: ${{ steps.pin.outputs.sha }}
+          path: maverick
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            connectors
+            maverick/core
+
+      # Shallow checks first: they need no toolchain and fail fastest.
+      - name: shallow validation
+        working-directory: connectors
+        run: python3 tools/validate.py
+
+      - name: build the SDK and the packaging tools from the pinned maverick
+        working-directory: maverick/core
+        run: cargo build --release -p mav-connector-sdk -p mav-connector-tool
+
+      # The deep path: compile, clippy, test, wasm-build, pack, and parity-check every connector
+      # against the SDK it will actually be signed for. Before this job existed, validate.py ran
+      # without --sdk-path and silently skipped all of it.
+      - name: deep validation
+        working-directory: connectors
+        run: |
+          python3 tools/validate.py \
+            --sdk-path ../maverick/core/crates/mav-connector-sdk \
+            --tool-dir ../maverick/core/target/release
+
+      - name: packaged artifacts match connector source
+        working-directory: connectors
+        run: |
+          python3 tools/regenerate.py --check \
+            --sdk-path ../maverick/core/crates/mav-connector-sdk \
+            --tool-dir ../maverick/core/target/release

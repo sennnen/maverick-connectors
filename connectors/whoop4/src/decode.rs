@@ -85,7 +85,7 @@ fn decode_realtime(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             "beats-per-minute",
         ));
     }
-    push_rr(&mut samples, payload, 9, 10, time_ms);
+    push_rr(&mut samples, payload, 9, 10, time_ms, u8::MAX);
     Ok(samples)
 }
 
@@ -118,7 +118,7 @@ fn decode_gen4_v5(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             "beats-per-minute",
         ));
     }
-    push_rr(&mut samples, body, 15, 16, time_ms);
+    push_rr(&mut samples, body, 15, 16, time_ms, 4);
     Ok(samples)
 }
 
@@ -137,7 +137,7 @@ fn decode_gen4_v24(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             "beats-per-minute",
         ));
     }
-    push_rr(&mut samples, body, 15, 16, time_ms);
+    push_rr(&mut samples, body, 15, 16, time_ms, 4);
     let gravity = [f32_le(body, 33), f32_le(body, 37), f32_le(body, 41)];
     if gravity_is_plausible(gravity) {
         for (sequence, value) in gravity.into_iter().enumerate() {
@@ -162,12 +162,13 @@ fn decode_gen4_v24(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             "counts",
         ));
     }
+    // 4.0 publishes no calibrated temperature — this is the thermistor register, in counts.
     samples.push(sample(
-        "skin-temp",
+        "skin-temp-raw",
         i64::from(u16_le(body, 65)) * 1_000_000,
         time_ms,
         0,
-        "degrees-celsius",
+        "counts",
     ));
     samples.push(sample(
         "resp-raw",
@@ -237,14 +238,17 @@ fn decode_event(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     }
 }
 
+/// `max_slots` is a layout fact, not a protocol one: the historical records reserve four slots,
+/// while a realtime burst carries as many intervals as elapsed since the last one.
 fn push_rr(
     samples: &mut Vec<WireSample>,
     bytes: &[u8],
     count_at: usize,
     first_at: usize,
     time_ms: i64,
+    max_slots: u8,
 ) {
-    let count = bytes.get(count_at).copied().unwrap_or(0).min(4);
+    let count = bytes.get(count_at).copied().unwrap_or(0).min(max_slots);
     let mut sequence = 0;
     for slot in 0..usize::from(count) {
         let at = first_at + slot * 2;

@@ -81,7 +81,7 @@ artifact_metadata! {
                 WasmFeature::SignExtension,
                 WasmFeature::BulkMemory,
             ],
-            sdk_version: "0.1.0".to_owned(),
+            sdk_version: "0.1.1".to_owned(),
         },
         fixtures: FixtureSet {
             schema: FIXTURES_SCHEMA.to_owned(),

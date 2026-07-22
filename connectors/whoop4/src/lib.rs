@@ -7,8 +7,8 @@ use mav_connector_sdk::{
 };
 use sha2::{Digest, Sha256};
 use whoop_protocol::{
-    build_command, decode_control, decode_frame, get_data_range, history_ack, request_history,
-    Control, ControlResult, Generation,
+    build_command, decode_control, decode_frame, decode_response, get_data_range, history_ack,
+    request_history, CommandResponse, Control, Deframer, Generation,
 };
 
 pub const CONNECTOR_ID: &str = "dev.maverick.whoop4";
@@ -53,6 +53,45 @@ pub struct Whoop4Connector {
     /// Wall time of the newest live sample. Session-local; deliberately absent from the snapshot so
     /// the state schema and every frozen fixture hash stay unchanged.
     last_live_ms: Option<i64>,
+    /// One reassembly buffer per notify characteristic. Also session-local: a frame cut short by a
+    /// dropped link must never be resumed across a reconnect.
+    deframers: Deframers,
+}
+
+/// Frame reassembly for the three framed notify characteristics. Standard heart rate is a Bluetooth
+/// SIG characteristic carrying no WHOOP envelope, so it has none.
+#[derive(Debug)]
+struct Deframers {
+    command_response: Deframer,
+    events: Deframer,
+    data: Deframer,
+}
+
+impl Default for Deframers {
+    fn default() -> Self {
+        Self {
+            command_response: Deframer::new(Generation::Gen4),
+            events: Deframer::new(Generation::Gen4),
+            data: Deframer::new(Generation::Gen4),
+        }
+    }
+}
+
+impl Deframers {
+    fn get_mut(&mut self, characteristic_id: &str) -> Option<&mut Deframer> {
+        match characteristic_id {
+            COMMAND_RESPONSE_ID => Some(&mut self.command_response),
+            EVENTS_ID => Some(&mut self.events),
+            DATA_ID => Some(&mut self.data),
+            _ => None,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.command_response.reset();
+        self.events.reset();
+        self.data.reset();
+    }
 }
 
 impl Default for Whoop4Connector {
@@ -64,6 +103,7 @@ impl Default for Whoop4Connector {
             next_operation: 1,
             history_retries: 0,
             last_live_ms: None,
+            deframers: Deframers::default(),
         }
     }
 }
@@ -75,6 +115,7 @@ impl Connector for Whoop4Connector {
             EventBody::Activate | EventBody::Resume => {
                 self.phase = Phase::Scanning;
                 self.subscriptions = 0;
+                self.deframers.reset();
                 self.actions(
                     &event,
                     vec![ActionBody::StartScan {
@@ -151,7 +192,9 @@ impl Connector for Whoop4Connector {
                 }
                 if self.subscriptions == ALL_SUBSCRIPTIONS && self.phase == Phase::Subscribing {
                     self.phase = Phase::Configuring;
-                    let hello = self.command(35, &[])?;
+                    // The 4.0 hello needs a nine-byte client-time argument to answer at all; its
+                    // content is ignored and an empty body draws silence.
+                    let hello = self.command(35, &[0u8; 9])?;
                     self.actions(
                         &event,
                         vec![ActionBody::Write {
@@ -225,6 +268,7 @@ impl Connector for Whoop4Connector {
             EventBody::Disconnected { .. } => {
                 self.phase = Phase::Disconnected;
                 self.subscriptions = 0;
+                self.deframers.reset();
                 let snapshot = self.snapshot()?;
                 self.actions(
                     &event,
@@ -239,6 +283,7 @@ impl Connector for Whoop4Connector {
             }
             EventBody::RestoreState { bytes } => {
                 self.restore(bytes)?;
+                self.deframers.reset();
                 Ok(empty())
             }
             EventBody::Suspend => {
@@ -295,25 +340,53 @@ impl Whoop4Connector {
             self.last_live_ms = Some(wall);
             return self.emit_or_diagnose(event, decode_standard_heart_rate(bytes, wall), false);
         }
-        let payload = match decode_frame(Generation::Gen4, bytes) {
-            Ok(payload) => payload,
-            Err(error) => {
-                return self.diagnostic(
+        let Some(deframer) = self.deframers.get_mut(characteristic_id) else {
+            return self.diagnostic(
+                event,
+                DiagnosticLevel::Warning,
+                "whoop4-channel",
+                &format!("notification on unknown characteristic {characteristic_id}"),
+            );
+        };
+        // One notification can carry a fragment, a whole frame, or several packed together.
+        let frames = deframer.push(bytes);
+        let mut actions = Vec::new();
+        for frame in frames {
+            let batch = match frame {
+                Ok(payload) => self.frame(event, &payload)?,
+                Err(error) => self.diagnostic(
                     event,
                     DiagnosticLevel::Warning,
                     "whoop4-frame",
                     &format!("malformed WHOOP 4.0 frame: {error:?}"),
-                )
+                )?,
+            };
+            actions.extend(batch.actions);
+        }
+        Ok(ActionBatch { actions })
+    }
+
+    fn frame(
+        &mut self,
+        event: &ConnectorEvent,
+        payload: &[u8],
+    ) -> Result<ActionBatch, ConnectorError> {
+        match decode_control(Generation::Gen4, payload).map_err(protocol_error)? {
+            Some(control @ Control::Response { .. }) => {
+                // 4.0 reports no status, so the body is the only thing a response says.
+                let mut batch = self.control(event, control)?;
+                batch
+                    .actions
+                    .extend(self.response_body(event, payload)?.actions);
+                Ok(batch)
             }
-        };
-        match decode_control(&payload).map_err(protocol_error)? {
             Some(control) => self.control(event, control),
             None => {
                 let refresh_deadline = self.phase == Phase::Historical;
                 if !refresh_deadline {
                     self.last_live_ms = event.wall_time_ms;
                 }
-                self.emit_or_diagnose(event, decode_payload(&payload), refresh_deadline)
+                self.emit_or_diagnose(event, decode_payload(payload), refresh_deadline)
             }
         }
     }
@@ -324,21 +397,13 @@ impl Whoop4Connector {
         control: Control,
     ) -> Result<ActionBatch, ConnectorError> {
         match control {
-            Control::Response {
-                to_opcode: 34,
-                result: ControlResult::Ok,
-                ..
-            } => {
+            // 4.0 reports no status, so any reply to GET_DATA_RANGE advances the offload.
+            Control::Response { to_opcode: 34, .. } => {
                 let seq = self.take_command_seq();
                 let command = request_history(Generation::Gen4, seq).map_err(protocol_error)?;
                 self.write_with_timeout(event, command)
             }
-            Control::Response {
-                to_opcode: 22,
-                result: ControlResult::Ok | ControlResult::Pending,
-                ..
-            }
-            | Control::MetadataStart { .. } => {
+            Control::Response { to_opcode: 22, .. } | Control::MetadataStart { .. } => {
                 self.phase = Phase::Historical;
                 self.actions(
                     event,
@@ -376,6 +441,58 @@ impl Whoop4Connector {
                 )
             }
             Control::Response { .. } | Control::MetadataUnknown { .. } => Ok(empty()),
+        }
+    }
+
+    /// Surface what a command response actually answered: battery reaches the pipeline as a
+    /// sample, identity, clock, and the banked-history window as diagnostics.
+    fn response_body(
+        &mut self,
+        event: &ConnectorEvent,
+        payload: &[u8],
+    ) -> Result<ActionBatch, ConnectorError> {
+        let time_ms = event.wall_time_ms;
+        match decode_response(Generation::Gen4, payload).map_err(protocol_error)? {
+            CommandResponse::Battery { deci_percent } if deci_percent <= 1000 => {
+                let Some(time_ms) = time_ms else {
+                    return Ok(empty());
+                };
+                self.actions(
+                    event,
+                    vec![ActionBody::EmitSamples {
+                        batch_id: BatchId(self.next_operation),
+                        samples: vec![WireSample {
+                            stream: "battery-soc".to_owned(),
+                            value_microunits: i64::from(deci_percent) * 100_000,
+                            device_time_ms: Some(time_ms),
+                            sequence: 0,
+                            unit: "percent".to_owned(),
+                        }],
+                    }],
+                )
+            }
+            CommandResponse::Hello {
+                device_name,
+                firmware,
+            } => self.diagnostic(
+                event,
+                DiagnosticLevel::Info,
+                "whoop4-identity",
+                &format!("strap {device_name}, firmware {firmware:?}"),
+            ),
+            CommandResponse::Clock { unix } => self.diagnostic(
+                event,
+                DiagnosticLevel::Info,
+                "whoop4-clock",
+                &format!("strap RTC reads {unix}"),
+            ),
+            CommandResponse::DataRange { oldest, newest } => self.diagnostic(
+                event,
+                DiagnosticLevel::Info,
+                "whoop4-data-range",
+                &format!("banked history spans {oldest:?}..{newest:?}"),
+            ),
+            _ => Ok(empty()),
         }
     }
 
@@ -554,7 +671,7 @@ fn streams() -> Vec<String> {
         "rr-interval",
         "gravity",
         "spo2-raw",
-        "skin-temp",
+        "skin-temp-raw",
         "resp-raw",
         "battery-soc",
         "wrist-state",
@@ -730,7 +847,7 @@ fn abi_descriptor() -> AbiDescriptor {
             WasmFeature::SignExtension,
             WasmFeature::BulkMemory,
         ],
-        sdk_version: "0.1.0".to_owned(),
+        sdk_version: "0.1.1".to_owned(),
     }
 }
 
@@ -788,7 +905,44 @@ fn parity_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
         payload.extend_from_slice(&cursor);
         fixture_gen4_frame(&payload)?
     };
+    let record = fixture_hex(include_str!(
+        "../../../crates/whoop-protocol/tests/fixtures/whoop_rs_gen4_v24.hex"
+    ))?;
+    let (head, tail) = record.split_at(20);
+    let mut packed = record.clone();
+    packed.extend_from_slice(&record);
     Ok(vec![
+        native_parity_fixture(
+            "frame-split-across-notifications",
+            streaming_fixture_state(),
+            vec![
+                fixture_event(
+                    1,
+                    EventBody::Notification {
+                        characteristic_id: DATA_ID.to_owned(),
+                        bytes: head.to_vec(),
+                    },
+                )?,
+                fixture_event(
+                    2,
+                    EventBody::Notification {
+                        characteristic_id: DATA_ID.to_owned(),
+                        bytes: tail.to_vec(),
+                    },
+                )?,
+            ],
+        )?,
+        native_parity_fixture(
+            "frames-packed-in-one-notification",
+            streaming_fixture_state(),
+            vec![fixture_event(
+                1,
+                EventBody::Notification {
+                    characteristic_id: DATA_ID.to_owned(),
+                    bytes: packed,
+                },
+            )?],
+        )?,
         native_parity_fixture(
             "history-cursor-retry",
             streaming_fixture_state(),
@@ -798,7 +952,7 @@ fn parity_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
                     2,
                     EventBody::Notification {
                         characteristic_id: COMMAND_RESPONSE_ID.to_owned(),
-                        bytes: fixture_gen4_frame(&[0x24, 1, 34, 1])?,
+                        bytes: fixture_gen4_frame(&[0x24, 1, 34, 0])?,
                     },
                 )?,
                 fixture_event(
@@ -828,7 +982,7 @@ fn parity_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
                 1,
                 EventBody::Notification {
                     characteristic_id: DATA_ID.to_owned(),
-                    bytes: vec![0xaa, 0x01],
+                    bytes: corrupt_gen4_frame()?,
                 },
             )?],
         )?,
@@ -898,7 +1052,7 @@ fn record_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
         wire_sample("gravity", 872_478, time_v24, 2, "milli-g"),
         wire_sample("spo2-raw", 592_000_000, time_v24, 0, "counts"),
         wire_sample("spo2-raw", 612_000_000, time_v24, 1, "counts"),
-        wire_sample("skin-temp", 861_000_000, time_v24, 0, "degrees-celsius"),
+        wire_sample("skin-temp-raw", 861_000_000, time_v24, 0, "counts"),
         wire_sample("resp-raw", 3_073_000_000, time_v24, 0, "counts"),
     ];
     let mut fixtures = vec![record_fixture(
@@ -1118,6 +1272,16 @@ fn fixture_hex(value: &str) -> Result<Vec<u8>, ConnectorError> {
             })
         })
         .collect()
+}
+
+/// A complete frame whose payload CRC fails. A merely truncated notification is no longer
+/// malformed: the deframer holds it until the rest of the frame arrives.
+fn corrupt_gen4_frame() -> Result<Vec<u8>, ConnectorError> {
+    let mut frame = fixture_gen4_frame(&[0x2f, 24, 0, 0])?;
+    if let Some(last) = frame.last_mut() {
+        *last ^= 0xff;
+    }
+    Ok(frame)
 }
 
 fn fixture_gen4_frame(payload: &[u8]) -> Result<Vec<u8>, ConnectorError> {

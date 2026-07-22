@@ -105,8 +105,8 @@ def workspace_checks(root: Path) -> list[str]:
             if entry_digests != package_digests:
                 problems.append("signed registry entries differ from packaged connector digests")
     template_text = template.read_text()
-    if 'mav-connector-sdk = "=0.1.0"' not in template_text:
-        problems.append("template must pin released mav-connector-sdk =0.1.0")
+    if 'mav-connector-sdk = "=0.1.1"' not in template_text:
+        problems.append("template must pin released mav-connector-sdk =0.1.1")
     for manifest in root.glob("**/Cargo.toml"):
         for line in manifest.read_text().splitlines():
             if "mav-connector" in line and "path" in line:
