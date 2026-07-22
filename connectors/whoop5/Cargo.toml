@@ -15,3 +15,10 @@ whoop-protocol = { path = "../../crates/whoop-protocol" }
 
 [lints]
 workspace = true
+
+[features]
+# The ECG discovery build. Off by default and never in a release artifact: it sends the
+# `enable_raw_data_w_ecg` config flag and START_RAW_DATA, then reports every frame it cannot decode
+# as hex so the bytes can be read. A Cargo feature rather than a runtime toggle, so a probe build
+# is a different artifact and cannot be shipped by mistake.
+ecg-probe = []

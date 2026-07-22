@@ -93,6 +93,81 @@ pub enum Control {
     },
 }
 
+/// The packet-type vocabulary the wire uses. Naming a type we cannot decode is not the same as
+/// decoding it: an unnamed type is reported as raw bytes with nowhere to look, while a named one
+/// says which frontier it belongs to. Only a handful have decoders; the rest are the map's edge.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PacketKind {
+    Command,
+    CommandResponse,
+    /// The MG-family command channel. Separate from `Command`, and undecoded.
+    PuffinCommand,
+    PuffinCommandResponse,
+    RealtimeData,
+    /// What `START_RAW_DATA` opens. Undecoded, and the most likely home of the MG's ECG waveform:
+    /// the config flag that gates the stream is literally named `enable_raw_data_w_ecg`.
+    RealtimeRawData,
+    HistoricalData,
+    Event,
+    Metadata,
+    ConsoleLogs,
+    RealtimeImuStream,
+    HistoricalImuStream,
+    RelativePuffinEvents,
+    PuffinEventsFromStrap,
+    PuffinMetadata,
+    Unknown(u8),
+}
+
+impl PacketKind {
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            35 => Self::Command,
+            36 => Self::CommandResponse,
+            37 => Self::PuffinCommand,
+            38 => Self::PuffinCommandResponse,
+            40 => Self::RealtimeData,
+            43 => Self::RealtimeRawData,
+            47 => Self::HistoricalData,
+            48 => Self::Event,
+            49 => Self::Metadata,
+            50 => Self::ConsoleLogs,
+            51 => Self::RealtimeImuStream,
+            52 => Self::HistoricalImuStream,
+            53 => Self::RelativePuffinEvents,
+            54 => Self::PuffinEventsFromStrap,
+            56 => Self::PuffinMetadata,
+            other => Self::Unknown(other),
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Command => "COMMAND",
+            Self::CommandResponse => "COMMAND_RESPONSE",
+            Self::PuffinCommand => "PUFFIN_COMMAND",
+            Self::PuffinCommandResponse => "PUFFIN_COMMAND_RESPONSE",
+            Self::RealtimeData => "REALTIME_DATA",
+            Self::RealtimeRawData => "REALTIME_RAW_DATA",
+            Self::HistoricalData => "HISTORICAL_DATA",
+            Self::Event => "EVENT",
+            Self::Metadata => "METADATA",
+            Self::ConsoleLogs => "CONSOLE_LOGS",
+            Self::RealtimeImuStream => "REALTIME_IMU_STREAM",
+            Self::HistoricalImuStream => "HISTORICAL_IMU_STREAM",
+            Self::RelativePuffinEvents => "RELATIVE_PUFFIN_EVENTS",
+            Self::PuffinEventsFromStrap => "PUFFIN_EVENTS_FROM_STRAP",
+            Self::PuffinMetadata => "PUFFIN_METADATA",
+            Self::Unknown(_) => "UNKNOWN",
+        }
+    }
+}
+
+/// `START_RAW_DATA` / `STOP_RAW_DATA`. Neither is destructive or persistent: the stream stops when
+/// told to, or when the link drops.
+pub const START_RAW_DATA: u8 = 81;
+pub const STOP_RAW_DATA: u8 = 82;
+
 /// Reviewed record decoder selected by generation and the version at inner byte 1.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecordDecoder {

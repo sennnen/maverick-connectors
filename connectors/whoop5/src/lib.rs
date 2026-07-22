@@ -12,6 +12,13 @@ use whoop_protocol::{
 };
 
 pub const CONNECTOR_ID: &str = "dev.maverick.whoop5";
+/// A probe build is different bytes, so it must be a different version — the install policy
+/// refuses two artifacts claiming one version, which is exactly right. The 900 series is reserved
+/// for discovery builds and never released.
+#[cfg(not(feature = "ecg-probe"))]
+pub const CONNECTOR_VERSION: &str = "1.0.5";
+#[cfg(feature = "ecg-probe")]
+pub const CONNECTOR_VERSION: &str = "1.900.0";
 pub const GEN5_SERVICE: &str = "fd4b0001-cce1-4033-93ce-002d5875f58a";
 const COMMAND_ID: &str = "command";
 const STANDARD_HR_ID: &str = "standard-heart-rate";
@@ -53,6 +60,28 @@ const FEATURE_FLAGS: [(&str, u8); 16] = [
 /// 118 preamble.
 const FIRST_FLAG_STEP: u8 = 3;
 const LAST_FLAG_STEP: u8 = FIRST_FLAG_STEP + FEATURE_FLAGS.len() as u8 - 1;
+
+/// The ECG discovery steps, appended after the R22 sequence in a probe build only.
+///
+/// The reasoning, recorded because nobody has decoded this: the MG carries a single-lead ECG that
+/// no source has found on the wire, the firmware gates it behind a config key, and the one config
+/// flag naming ECG is `enable_raw_data_w_ecg` — present in firmware but absent from the R22
+/// sequence. The stream that flag qualifies is opened by `START_RAW_DATA`, and the packet type
+/// that stream produces is 43, `REALTIME_RAW_DATA`, which every source names and none decodes.
+/// So: set the flag, open the stream, and read whatever type 43 carries.
+///
+/// Both writes are reversible and neither is destructive. `STOP_RAW_DATA` closes the stream, and
+/// the link dropping closes it too.
+#[cfg(feature = "ecg-probe")]
+const ECG_FLAG_STEP: u8 = LAST_FLAG_STEP + 1;
+#[cfg(feature = "ecg-probe")]
+const ECG_START_STEP: u8 = ECG_FLAG_STEP + 1;
+/// How many bytes of an undecoded frame the probe reports. Bounded: a diagnostic is a bounded
+/// action, and a v20 buffer is two kilobytes.
+#[cfg(feature = "ecg-probe")]
+const ECG_OFFLOAD_STEP: u8 = ECG_START_STEP + 1;
+#[cfg(feature = "ecg-probe")]
+const PROBE_HEX_BYTES: usize = 192;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
@@ -415,6 +444,30 @@ impl Whoop5Connector {
                     whoop_protocol::set_config(seq, name, value).map_err(protocol_error)?;
                 self.write(event, command)
             }
+            #[cfg(feature = "ecg-probe")]
+            ECG_FLAG_STEP => {
+                self.config_step += 1;
+                let seq = self.take_command_seq();
+                let command = whoop_protocol::set_config(seq, "enable_raw_data_w_ecg", b'2')
+                    .map_err(protocol_error)?;
+                self.write(event, command)
+            }
+            #[cfg(feature = "ecg-probe")]
+            ECG_START_STEP => {
+                self.config_step += 1;
+                let command = self.command(whoop_protocol::START_RAW_DATA, &[])?;
+                self.write(event, command)
+            }
+            // The oracle opens the raw stream and immediately kicks a history offload, noting that
+            // type-43 "rides that window". Reproduced here, because the raw stream produced nothing
+            // on its own.
+            #[cfg(feature = "ecg-probe")]
+            ECG_OFFLOAD_STEP => {
+                self.config_step += 1;
+                let seq = self.take_command_seq();
+                let command = request_history(Generation::Gen5, seq).map_err(protocol_error)?;
+                self.write(event, command)
+            }
             _ => {
                 self.phase = Phase::Streaming;
                 self.actions(
@@ -520,6 +573,25 @@ impl Whoop5Connector {
                 "whoop5-data-range",
                 &format!("banked history spans {oldest:?}..{newest:?}"),
             ),
+            #[cfg(feature = "ecg-probe")]
+            CommandResponse::Unmapped { to_opcode } => {
+                // The reply to START_RAW_DATA lands here. Whether the strap accepted, refused, or
+                // ignored it is the single most useful fact in the probe, and without this it was
+                // silently discarded.
+                let status = match decode_control(Generation::Gen5, payload) {
+                    Ok(Some(Control::Response { result, .. })) => format!("{result:?}"),
+                    _ => "no status".to_owned(),
+                };
+                self.diagnostic(
+                    event,
+                    DiagnosticLevel::Info,
+                    "whoop5-probe-response",
+                    &format!(
+                        "response to opcode {to_opcode}: {status} · {}",
+                        probe_hex(payload)
+                    ),
+                )
+            }
             _ => Ok(empty()),
         }
     }
@@ -570,9 +642,47 @@ impl Whoop5Connector {
                 if !refresh_deadline {
                     self.last_live_ms = event.wall_time_ms;
                 }
-                self.emit_or_diagnose(event, decode_payload(payload), refresh_deadline)
+                match decode_payload(payload) {
+                    Ok(samples) => self.emit_or_diagnose(event, Ok(samples), refresh_deadline),
+                    // A packet type with no decoder is the edge of the map, not a malformed frame.
+                    // Name it and say how big it was, so a frontier type shows up as itself rather
+                    // than as an anonymous decode failure.
+                    Err(decode::DecodeError::UnknownPacket(kind)) => {
+                        self.unmapped_packet(event, kind, payload)
+                    }
+                    Err(error) => self.emit_or_diagnose(event, Err(error), refresh_deadline),
+                }
             }
         }
+    }
+
+    /// Report a frame whose packet type has no decoder. Always names the type and its length; a
+    /// probe build additionally reports the leading bytes as hex, because reading them is the only
+    /// way anyone decodes a type nobody has decoded.
+    fn unmapped_packet(
+        &mut self,
+        event: &ConnectorEvent,
+        kind: u8,
+        payload: &[u8],
+    ) -> Result<ActionBatch, ConnectorError> {
+        let named = whoop_protocol::PacketKind::from_u8(kind);
+        #[cfg_attr(not(feature = "ecg-probe"), allow(unused_mut))]
+        let mut message = format!(
+            "unmapped packet {kind} ({}), {} bytes",
+            named.name(),
+            payload.len()
+        );
+        #[cfg(feature = "ecg-probe")]
+        {
+            message.push_str(" · ");
+            message.push_str(&probe_hex(payload));
+        }
+        self.diagnostic(
+            event,
+            DiagnosticLevel::Info,
+            "whoop5-unmapped-packet",
+            &message,
+        )
     }
 
     fn control(
@@ -867,7 +977,7 @@ fn manifest() -> Result<Manifest, ConnectorError> {
     Ok(Manifest {
         schema: MANIFEST_SCHEMA.to_owned(),
         connector_id: ConnectorId::new(CONNECTOR_ID)?,
-        version: "1.0.5".to_owned(),
+        version: CONNECTOR_VERSION.to_owned(),
         display_name: "WHOOP 5.0 / MG".to_owned(),
         description: "Local WHOOP 5.0/MG connector; deep availability remains unverified"
             .to_owned(),
@@ -1473,6 +1583,22 @@ fn fixture_hex(value: &str) -> Result<Vec<u8>, ConnectorError> {
             })
         })
         .collect()
+}
+
+/// Leading bytes of a payload as hex, bounded so a diagnostic stays a bounded action.
+#[cfg(feature = "ecg-probe")]
+fn probe_hex(payload: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let shown = payload.len().min(PROBE_HEX_BYTES);
+    let mut hex = String::with_capacity(shown * 2 + 8);
+    for byte in &payload[..shown] {
+        hex.push(DIGITS[usize::from(byte >> 4)] as char);
+        hex.push(DIGITS[usize::from(byte & 0x0f)] as char);
+    }
+    if payload.len() > shown {
+        hex.push('\u{2026}');
+    }
+    hex
 }
 
 /// A complete frame whose payload CRC fails. A merely truncated notification is no longer
