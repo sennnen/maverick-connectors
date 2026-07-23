@@ -18,7 +18,7 @@ pub const CONNECTOR_ID: &str = "dev.maverick.whoop5";
 #[cfg(not(feature = "ecg-probe"))]
 pub const CONNECTOR_VERSION: &str = "1.0.5";
 #[cfg(feature = "ecg-probe")]
-pub const CONNECTOR_VERSION: &str = "1.902.0";
+pub const CONNECTOR_VERSION: &str = "1.903.0";
 pub const GEN5_SERVICE: &str = "fd4b0001-cce1-4033-93ce-002d5875f58a";
 const COMMAND_ID: &str = "command";
 const STANDARD_HR_ID: &str = "standard-heart-rate";
@@ -501,8 +501,11 @@ impl Whoop5Connector {
             #[cfg(feature = "ecg-probe")]
             ECG_START_STEP => {
                 self.config_step += 1;
-                let command = self.command(whoop_protocol::START_RAW_DATA, &[])?;
-                self.probe_write(event, command, "START_RAW_DATA(81)")
+                // Opcode 63 with a [0x01] revision byte is the real raw-AFE trigger, cracked on a
+                // live MG. START_RAW_DATA (81) is accepted but streams nothing; enable_raw_data_w_ecg
+                // is not a config key on this firmware. See docs/protocol/whoop.md.
+                let command = self.command(whoop_protocol::START_AFE_RAW, &[1])?;
+                self.probe_write(event, command, "START_AFE_RAW(63) [0x01]")
             }
             _ => {
                 self.phase = Phase::Streaming;

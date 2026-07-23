@@ -3,12 +3,17 @@
 extern crate alloc;
 
 mod deframe;
+mod realtime_raw;
 mod response;
 
 use alloc::vec;
 use alloc::vec::Vec;
 
 pub use deframe::Deframer;
+pub use realtime_raw::{
+    decode_realtime_raw, RawAfeFrame, RAW_SAMPLES_PER_FRAME, RAW_SAMPLE_RATE_HZ, REALTIME_RAW_DATA,
+    START_AFE_RAW, STOP_AFE_RAW,
+};
 pub use response::{
     decode_battery_event, decode_response, refused_opcodes, BatteryEvent, CommandResponse,
     DESTRUCTIVE, GATED,

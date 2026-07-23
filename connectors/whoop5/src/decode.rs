@@ -18,6 +18,9 @@ pub fn decode_payload(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
         // with the packet-40 layout published wrong heart rates. It fails closed until a capture
         // pins the fields.
         40 => decode_realtime(payload),
+        // Raw AFE (opcode-63 stream) is captured only in probe builds; release never triggers it.
+        #[cfg(feature = "ecg-probe")]
+        43 => decode_raw_afe(payload),
         47 => decode_record(payload),
         48 => decode_event(payload),
         36 | 49 => Ok(Vec::new()),
@@ -212,6 +215,35 @@ fn decode_v18(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
         0,
         "percent",
     ));
+    Ok(samples)
+}
+
+/// Decode a type-43 raw-AFE frame (opcode 63 stream) into per-channel samples at 100 Hz: the ECG
+/// electrode lead and the two optical PPG channels. The v0x0b subtype (u32 full-resolution
+/// channels) is intentionally left undecoded and yields no samples rather than an error.
+#[cfg(feature = "ecg-probe")]
+fn decode_raw_afe(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
+    let Ok(frame) = whoop_protocol::decode_realtime_raw(payload) else {
+        return Ok(Vec::new());
+    };
+    let base_ms = i64::from(frame.unix_time) * 1000;
+    let step_ms = 1000 / i64::from(whoop_protocol::RAW_SAMPLE_RATE_HZ);
+    let mut samples = Vec::with_capacity(whoop_protocol::RAW_SAMPLES_PER_FRAME * 3);
+    for (stream, channel) in [
+        ("ecg", &frame.ecg),
+        ("ppg-raw-a", &frame.ppg_a),
+        ("ppg-raw-b", &frame.ppg_b),
+    ] {
+        for (sequence, &counts) in channel.iter().enumerate() {
+            samples.push(sample(
+                stream,
+                i64::from(counts) * 1_000_000,
+                base_ms + sequence as i64 * step_ms,
+                sequence as u32,
+                "counts",
+            ));
+        }
+    }
     Ok(samples)
 }
 
