@@ -18,7 +18,7 @@ pub const CONNECTOR_ID: &str = "dev.maverick.whoop5";
 #[cfg(not(feature = "ecg-probe"))]
 pub const CONNECTOR_VERSION: &str = "1.0.5";
 #[cfg(feature = "ecg-probe")]
-pub const CONNECTOR_VERSION: &str = "1.900.0";
+pub const CONNECTOR_VERSION: &str = "1.902.0";
 pub const GEN5_SERVICE: &str = "fd4b0001-cce1-4033-93ce-002d5875f58a";
 const COMMAND_ID: &str = "command";
 const STANDARD_HR_ID: &str = "standard-heart-rate";
@@ -28,6 +28,8 @@ const DATA_ID: &str = "data";
 /// The strap narrates its firmware console here — history-sync progress, RTC complaints,
 /// the persistent-config table. Text, never samples.
 const CONSOLE_ID: &str = "console";
+/// Packet type 50. Console frames are identified by this, not by which characteristic carried them.
+const CONSOLE_LOGS_PACKET: u8 = 50;
 const ALL_SUBSCRIPTIONS: u8 = 0x1f;
 const IDLE_TIMER: TimerToken = TimerToken(200);
 const RESPONSE_TIMER: TimerToken = TimerToken(201);
@@ -72,14 +74,37 @@ const LAST_FLAG_STEP: u8 = FIRST_FLAG_STEP + FEATURE_FLAGS.len() as u8 - 1;
 ///
 /// Both writes are reversible and neither is destructive. `STOP_RAW_DATA` closes the stream, and
 /// the link dropping closes it too.
+/// The config key exchange, cracked against a live MG.
+///
+/// `117 [0x01]` opens it and answers `Ok` with the key count in its body — 14 on firmware 50.33.2.0.
+/// `118 [0x01]` then walks the table one key per call, answering `Ok` with that key's **name**
+/// (`general_ab_test` came back first, one of the firmware-only flags absent from the R22 set).
+///
+/// Sent with an empty body — as this connector did until now — the strap reads a revision of zero
+/// and refuses both with `unsupported revision:0` on its console. The exchange then never opens, and
+/// SET_CONFIG for any key the firmware has not announced is rejected. That is why five R22 flags
+/// failed, `enable_raw_data_w_ecg` among them.
 #[cfg(feature = "ecg-probe")]
-const ECG_FLAG_STEP: u8 = LAST_FLAG_STEP + 1;
+const CONFIG_KEY_REVISION: u8 = 0x01;
+/// How many times to call 118. The strap reported 14 keys; a few spare calls cost nothing and the
+/// replies say when the table is exhausted.
+#[cfg(feature = "ecg-probe")]
+const CONFIG_KEY_WALK: u8 = 18;
+#[cfg(feature = "ecg-probe")]
+const KEY_OPEN_STEP: u8 = LAST_FLAG_STEP + 1;
+#[cfg(feature = "ecg-probe")]
+const KEY_WALK_FIRST: u8 = KEY_OPEN_STEP + 1;
+#[cfg(feature = "ecg-probe")]
+const KEY_WALK_LAST: u8 = KEY_WALK_FIRST + CONFIG_KEY_WALK - 1;
+#[cfg(feature = "ecg-probe")]
+const ECG_FLAG_STEP: u8 = KEY_WALK_LAST + 1;
 #[cfg(feature = "ecg-probe")]
 const ECG_START_STEP: u8 = ECG_FLAG_STEP + 1;
-/// How many bytes of an undecoded frame the probe reports. Bounded: a diagnostic is a bounded
-/// action, and a v20 buffer is two kilobytes.
+/// A diagnostic is a host operation, and a session has a bounded budget for them. The first probe
+/// build spent it on console narration and died mid-run; this cap keeps the interesting early
+/// frames and stops before the session does.
 #[cfg(feature = "ecg-probe")]
-const ECG_OFFLOAD_STEP: u8 = ECG_START_STEP + 1;
+const PROBE_DIAGNOSTIC_BUDGET: u16 = 150;
 #[cfg(feature = "ecg-probe")]
 const PROBE_HEX_BYTES: usize = 192;
 
@@ -115,6 +140,9 @@ pub struct Whoop5Connector {
     /// One reassembly buffer per notify characteristic. Also session-local: a frame cut short by a
     /// dropped link must never be resumed across a reconnect.
     deframers: Deframers,
+    /// Remaining probe diagnostics this session. Session-local and absent from the snapshot.
+    #[cfg(feature = "ecg-probe")]
+    probe_budget: u16,
 }
 
 /// Frame reassembly for the four framed notify characteristics. Standard heart rate is a Bluetooth
@@ -169,6 +197,8 @@ impl Default for Whoop5Connector {
             paired: false,
             last_live_ms: None,
             deframers: Deframers::default(),
+            #[cfg(feature = "ecg-probe")]
+            probe_budget: PROBE_DIAGNOSTIC_BUDGET,
         }
     }
 }
@@ -444,6 +474,22 @@ impl Whoop5Connector {
                     whoop_protocol::set_config(seq, name, value).map_err(protocol_error)?;
                 self.write(event, command)
             }
+            // Open the config key exchange. Revision 1 is the value the strap accepts; anything
+            // else, including the empty body this connector used to send, is refused.
+            #[cfg(feature = "ecg-probe")]
+            KEY_OPEN_STEP => {
+                self.config_step += 1;
+                let command = self.command(117, &[CONFIG_KEY_REVISION])?;
+                self.probe_write(event, command, "117 open key exchange (revision 1)")
+            }
+            // Walk the key table. Each call answers with one key's name.
+            #[cfg(feature = "ecg-probe")]
+            KEY_WALK_FIRST..=KEY_WALK_LAST => {
+                let index = self.config_step - KEY_WALK_FIRST;
+                self.config_step += 1;
+                let command = self.command(118, &[CONFIG_KEY_REVISION])?;
+                self.probe_write(event, command, &format!("118 next key #{index}"))
+            }
             #[cfg(feature = "ecg-probe")]
             ECG_FLAG_STEP => {
                 self.config_step += 1;
@@ -457,20 +503,6 @@ impl Whoop5Connector {
                 self.config_step += 1;
                 let command = self.command(whoop_protocol::START_RAW_DATA, &[])?;
                 self.probe_write(event, command, "START_RAW_DATA(81)")
-            }
-            // The oracle opens the raw stream and immediately kicks a history offload, noting that
-            // type-43 "rides that window". Reproduced here, because the raw stream produced nothing
-            // on its own.
-            #[cfg(feature = "ecg-probe")]
-            ECG_OFFLOAD_STEP => {
-                self.config_step += 1;
-                let seq = self.take_command_seq();
-                let command = request_history(Generation::Gen5, seq).map_err(protocol_error)?;
-                self.probe_write(
-                    event,
-                    command,
-                    "SEND_HISTORICAL_DATA(22) to open the window",
-                )
             }
             _ => {
                 self.phase = Phase::Streaming;
@@ -517,11 +549,14 @@ impl Whoop5Connector {
         };
         // One notification can carry a fragment, a whole frame, or several packed together.
         let frames = deframer.push(bytes);
-        let console = characteristic_id == CONSOLE_ID;
         let mut actions = Vec::new();
         for frame in frames {
             let batch = match frame {
-                Ok(payload) if console => self.console_text(event, &payload)?,
+                // Console output is not confined to the console characteristic — a live strap sends
+                // it on the data channel too. Route by what the frame says it is.
+                Ok(payload) if payload.first() == Some(&CONSOLE_LOGS_PACKET) => {
+                    self.console_text(event, &payload)?
+                }
                 Ok(payload) => self.frame(event, &payload)?,
                 Err(error) => self.diagnostic(
                     event,
@@ -551,9 +586,8 @@ impl Whoop5Connector {
                 })) => format!("opcode {to_opcode} → {result:?}"),
                 _ => "unparsed".to_owned(),
             };
-            self.diagnostic(
+            self.probe_note(
                 event,
-                DiagnosticLevel::Info,
                 "whoop5-probe-response",
                 &format!("{status} · {}", probe_hex(payload)),
             )?
@@ -624,6 +658,9 @@ impl Whoop5Connector {
         if text.is_empty() {
             return Ok(empty());
         }
+        #[cfg(feature = "ecg-probe")]
+        return self.probe_note(event, "whoop5-console", &text);
+        #[cfg(not(feature = "ecg-probe"))]
         self.diagnostic(event, DiagnosticLevel::Info, "whoop5-console", &text)
     }
 
@@ -778,6 +815,23 @@ impl Whoop5Connector {
         }
     }
 
+    /// A probe diagnostic, if the session can still afford one. Returns an empty batch once the
+    /// budget is spent, so a chatty strap cannot exhaust the host's operation allowance and kill
+    /// the session before the probe finishes.
+    #[cfg(feature = "ecg-probe")]
+    fn probe_note(
+        &mut self,
+        event: &ConnectorEvent,
+        code: &str,
+        message: &str,
+    ) -> Result<ActionBatch, ConnectorError> {
+        if self.probe_budget == 0 {
+            return Ok(empty());
+        }
+        self.probe_budget -= 1;
+        self.diagnostic(event, DiagnosticLevel::Info, code, message)
+    }
+
     /// A probe write, announced. Without this the journal cannot distinguish "the strap ignored
     /// the command" from "the command was never sent", and those need completely different fixes.
     #[cfg(feature = "ecg-probe")]
@@ -787,9 +841,8 @@ impl Whoop5Connector {
         bytes: Vec<u8>,
         what: &str,
     ) -> Result<ActionBatch, ConnectorError> {
-        let mut batch = self.diagnostic(
+        let mut batch = self.probe_note(
             event,
-            DiagnosticLevel::Info,
             "whoop5-probe-step",
             &format!("sending {what} · {}", probe_hex(&bytes)),
         )?;

@@ -805,7 +805,11 @@ fn live_streaming_defers_historical_offload_instead_of_preempting_it() {
 /// decoder would invent samples out of ASCII.
 #[test]
 fn console_frames_become_diagnostics_and_never_samples() {
+    // A real console frame carries packet type 50 at [0] — the live capture starts 0x32 — and the
+    // text sits behind a ten-byte record header. Routing is by that type, not by which
+    // characteristic delivered it: a live strap sends console output on the data channel too.
     let mut payload = vec![0u8; 10];
+    payload[0] = 50;
     payload.extend_from_slice(b"RTC timestamp invalid; not saving\n");
     let mut driver = TestDriver::new(Whoop5Connector::default());
     let emitted = bodies(
