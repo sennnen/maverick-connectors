@@ -2,9 +2,9 @@
   "schema": "mavconn-parity/v1",
   "connector_id": "dev.maverick.whoop5",
   "connector_version": "1.0.5",
-  "artifact_sha256": "a92f2b1aa187cb6ff897952a695efa72dea3c28c8b5c38038dcd152442e2abf6",
+  "artifact_sha256": "7b0e37531cc8293467ecbf90bc42ea5c352e956e22aef49fc811656f72d74cda",
   "manifest_sha256": "50d38e77fad23d312489ec3bd328976022be20da76a8b7b5734fb4a836f15635",
-  "signed_sha256": "33d4109ce276efa7e259262ec2d45b963f78c6a1af1aef00e1efdcefabab8f86",
+  "signed_sha256": "1461f44b37d013d5b4473f8df14daa37c7c631ec52dc77db43334ea1c7e7f6d0",
   "fixture_count": 14,
   "fixtures": [
     {
@@ -124,7 +124,7 @@
       "action_trace_sha256": "24566bcf77ac2a0d1ed62e158a1033d21ef6904f8863740edeffe96832acbfb2",
       "sample_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "final_state_sha256": "7f20f9f9870aa36bba8b049df251f953a5cdac0951bc0bd811171f6c7b04db74",
-      "max_fuel_consumed": 82887,
+      "max_fuel_consumed": 82931,
       "peak_memory_bytes": 1179648
     },
     {

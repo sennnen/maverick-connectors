@@ -4,6 +4,6 @@
   "key_id": "registry-root-v1",
   "algorithm": "Ed25519",
   "public_key_hex": "7be29b98ba0937eadfa1fc1b47931f05dfce49faeee896c0f40c24a78d649fe6",
-  "signing_digest_hex": "bc9f525af48434bb90ca7b69573b4cad68ba611d173970f3e70bcfc9547b5c8a",
-  "signed_index_sha256": "a65db6bd4793383c7ceb98b75a110aa611d017666e58e3ca67e507ddb43429fc"
+  "signing_digest_hex": "09cad0a790013832e7e47b8bd3524b290fe72033e12e7b24bf8b62fa19ab1609",
+  "signed_index_sha256": "ee234937766517fae551becf5c3d143c421e8500af1a019f22762d0e6e78ebfd"
 }

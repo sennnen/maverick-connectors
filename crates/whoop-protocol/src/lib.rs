@@ -11,7 +11,8 @@ use alloc::vec::Vec;
 
 pub use deframe::Deframer;
 pub use realtime_raw::{
-    decode_realtime_raw, RawAfeFrame, RAW_SAMPLES_PER_FRAME, RAW_SAMPLE_RATE_HZ, REALTIME_RAW_DATA,
+    decode_pulse_ox, decode_realtime_raw, RawAfeFrame, RawPulseOxFrame, PULSE_OX_SAMPLES_PER_FRAME,
+    PULSE_OX_SAMPLE_RATE_HZ, RAW_SAMPLES_PER_FRAME, RAW_SAMPLE_RATE_HZ, REALTIME_RAW_DATA,
     START_AFE_RAW, STOP_AFE_RAW,
 };
 pub use response::{

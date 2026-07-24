@@ -221,30 +221,57 @@ fn decode_v18(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
 /// Decode a type-43 raw-AFE frame (opcode 63 stream) into per-channel samples at 100 Hz: the ECG
 /// electrode lead and the two optical PPG channels. The v0x0b subtype (u32 full-resolution
 /// channels) is intentionally left undecoded and yields no samples rather than an error.
+// The raw AFE stream carries two interleaved subtypes: v0x0a (100 Hz ECG + two PPG, u16) and v0x0b
+// (25 Hz pulse-ox red/IR/ambient, signed i32). Both are surfaced only in a probe build.
 #[cfg(feature = "ecg-probe")]
 fn decode_raw_afe(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
-    let Ok(frame) = whoop_protocol::decode_realtime_raw(payload) else {
-        return Ok(Vec::new());
-    };
-    let base_ms = i64::from(frame.unix_time) * 1000;
-    let step_ms = 1000 / i64::from(whoop_protocol::RAW_SAMPLE_RATE_HZ);
-    let mut samples = Vec::with_capacity(whoop_protocol::RAW_SAMPLES_PER_FRAME * 3);
-    for (stream, channel) in [
-        ("ecg", &frame.ecg),
-        ("ppg-raw-a", &frame.ppg_a),
-        ("ppg-raw-b", &frame.ppg_b),
-    ] {
+    if let Ok(frame) = whoop_protocol::decode_realtime_raw(payload) {
+        return Ok(emit_raw_channels(
+            frame.unix_time,
+            whoop_protocol::RAW_SAMPLE_RATE_HZ,
+            &[
+                ("ecg", frame.ecg.as_slice()),
+                ("ppg-raw-a", frame.ppg_a.as_slice()),
+                ("ppg-raw-b", frame.ppg_b.as_slice()),
+            ],
+        ));
+    }
+    if let Ok(frame) = whoop_protocol::decode_pulse_ox(payload) {
+        return Ok(emit_raw_channels(
+            frame.unix_time,
+            whoop_protocol::PULSE_OX_SAMPLE_RATE_HZ,
+            &[
+                ("ppg-red", frame.red.as_slice()),
+                ("ppg-ir", frame.ir.as_slice()),
+                ("ppg-ambient", frame.ambient.as_slice()),
+            ],
+        ));
+    }
+    Ok(Vec::new())
+}
+
+// One WireSample per sample, timestamped by the frame's Unix second plus the per-sample step.
+#[cfg(feature = "ecg-probe")]
+fn emit_raw_channels<T: Copy + Into<i64>>(
+    unix_time: u32,
+    rate_hz: u32,
+    channels: &[(&str, &[T])],
+) -> Vec<WireSample> {
+    let base_ms = i64::from(unix_time) * 1000;
+    let step_ms = 1000 / i64::from(rate_hz);
+    let mut samples = Vec::new();
+    for (stream, channel) in channels {
         for (sequence, &counts) in channel.iter().enumerate() {
             samples.push(sample(
                 stream,
-                i64::from(counts) * 1_000_000,
+                counts.into() * 1_000_000,
                 base_ms + sequence as i64 * step_ms,
                 sequence as u32,
                 "counts",
             ));
         }
     }
-    Ok(samples)
+    samples
 }
 
 fn decode_v26(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
