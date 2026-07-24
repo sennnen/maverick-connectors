@@ -65,15 +65,14 @@ const LAST_FLAG_STEP: u8 = FIRST_FLAG_STEP + FEATURE_FLAGS.len() as u8 - 1;
 
 /// The ECG discovery steps, appended after the R22 sequence in a probe build only.
 ///
-/// The reasoning, recorded because nobody has decoded this: the MG carries a single-lead ECG that
-/// no source has found on the wire, the firmware gates it behind a config key, and the one config
-/// flag naming ECG is `enable_raw_data_w_ecg` — present in firmware but absent from the R22
-/// sequence. The stream that flag qualifies is opened by `START_RAW_DATA`, and the packet type
-/// that stream produces is 43, `REALTIME_RAW_DATA`, which every source names and none decodes.
-/// So: set the flag, open the stream, and read whatever type 43 carries.
+/// Cracked against a live MG (see maverick's docs/protocol/whoop-raw-afe.md): the single-lead ECG
+/// rides packet type 43, `REALTIME_RAW_DATA`, and the stream is opened by opcode 63 (`START_AFE_RAW`)
+/// with a `[0x01]` revision byte — not `START_RAW_DATA` (81), which is accepted but streams nothing,
+/// and not the `enable_raw_data_w_ecg` config flag, which this firmware rejects outright. The probe
+/// still sends that flag first, purely to record the rejection, then triggers 63 and reads type 43.
 ///
-/// Both writes are reversible and neither is destructive. `STOP_RAW_DATA` closes the stream, and
-/// the link dropping closes it too.
+/// Every write is reversible and none is destructive. `STOP_AFE_RAW` closes the stream, and the link
+/// dropping closes it too.
 /// The config key exchange, cracked against a live MG.
 ///
 /// `117 [0x01]` opens it and answers `Ok` with the key count in its body — 14 on firmware 50.33.2.0.

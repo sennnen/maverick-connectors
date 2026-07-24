@@ -2,9 +2,9 @@
   "schema": "mavconn-package-test/v1",
   "package": "mav-connector-whoop4",
   "wasm": "mav_connector_whoop4.wasm",
-  "publisher_key_id": "maverick-whoop-test",
-  "public_key_hex": "dfef1d92a685c9df623b8a321740b0a59de0de538bbfea9ddb703394a1e0f5bd",
-  "signed_sha256": "fec7bcf65bc3f13b12a14b2b5ee5963d49b793cd86fcab22c627c08f77aa0a85",
-  "signature_hex": "ea6d9813b57e2face0700d026dcfb7a0d98782bc293513bd33673bdfaf7b5879c6c639ef6963837728337b661255cdab9075d328adea1c3cfd36041c52415c00",
-  "artifact_sha256": "3158072c210ff18a510e044192a28b781669a276cab6279ed0ae58dfef23c72d"
+  "publisher_key_id": "maverick-whoop-live-test",
+  "public_key_hex": "e1b71abfd3232804261e423f36556f6b4185bed41fdfd00d769ce15a394f43ce",
+  "signed_sha256": "40abb236465a53ebade7d2b624f2afcf99c2f675bad198402b008cc350de675c",
+  "signature_hex": "504610a53ccfc5926fb41202c44c48e86895a67f8a1217503b41078c65c4b4d79435a0cbc7d49431d9d7814783d56b15afd8a2ef260e8b9e199b5ecc0474690f",
+  "artifact_sha256": "3d006ae7bc0910de074f40b6d5860d8649c0e4fb73249e345ac16ab615bdd66f"
 }

@@ -9,26 +9,40 @@
   "entries": [
     {
       "connector_id": "dev.maverick.whoop4",
-      "version": "1.0.0",
-      "artifact_sha256": "3158072c210ff18a510e044192a28b781669a276cab6279ed0ae58dfef23c72d",
-      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-3158072c210ff18a510e044192a28b781669a276cab6279ed0ae58dfef23c72d.mavconn",
-      "artifact_size": 199893,
-      "publisher_key_id": "maverick-whoop-test",
-      "abi": { "major": 1, "min_minor": 0, "max_minor": 0 },
-      "core": { "min_version": "0.1.0", "max_version": null },
+      "version": "1.0.2",
+      "artifact_sha256": "3d006ae7bc0910de074f40b6d5860d8649c0e4fb73249e345ac16ab615bdd66f",
+      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-3d006ae7bc0910de074f40b6d5860d8649c0e4fb73249e345ac16ab615bdd66f.mavconn",
+      "artifact_size": 212270,
+      "publisher_key_id": "maverick-whoop-live-test",
+      "abi": {
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "core": {
+        "min_version": "0.1.0",
+        "max_version": null
+      },
       "channel": "stable",
       "supersedes": null,
       "revoked": false
     },
     {
       "connector_id": "dev.maverick.whoop5",
-      "version": "1.0.0",
-      "artifact_sha256": "3c4c013f6c593c411fb822e65b8c363a6524dbf759390c10781a8bae695cfd47",
-      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-3c4c013f6c593c411fb822e65b8c363a6524dbf759390c10781a8bae695cfd47.mavconn",
-      "artifact_size": 245042,
-      "publisher_key_id": "maverick-whoop-test",
-      "abi": { "major": 1, "min_minor": 0, "max_minor": 0 },
-      "core": { "min_version": "0.1.0", "max_version": null },
+      "version": "1.0.5",
+      "artifact_sha256": "a92f2b1aa187cb6ff897952a695efa72dea3c28c8b5c38038dcd152442e2abf6",
+      "artifact_url": "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-a92f2b1aa187cb6ff897952a695efa72dea3c28c8b5c38038dcd152442e2abf6.mavconn",
+      "artifact_size": 259082,
+      "publisher_key_id": "maverick-whoop-live-test",
+      "abi": {
+        "major": 1,
+        "min_minor": 0,
+        "max_minor": 0
+      },
+      "core": {
+        "min_version": "0.1.0",
+        "max_version": null
+      },
       "channel": "stable",
       "supersedes": null,
       "revoked": false

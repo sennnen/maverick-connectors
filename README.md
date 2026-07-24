@@ -57,9 +57,17 @@ WC-P11 froze parity, WC-P12 removed the legacy JSON path, and WC-P15 added the s
 ## Security
 
 Connector publisher signing is separate from Android/iOS application signing and registry signing.
-No private key belongs in this repository. Packer accepts only public-key and signature bytes
-produced outside the process, then verifies its own output. The local
+No *production* private key belongs in this repository. Packer accepts only public-key and signature
+bytes produced outside the process, then verifies its own output. The local
 `maverick-signing/maverick-release.jks` is an Android release asset and is not a connector key.
+
+The one deliberate exception is the **sandbox test-fixture** key. The `.mavconn` files, their
+`package-test.json`/`parity-v1.json` reports, and the development registry are signed by a committed
+Ed25519 test seed under publisher `maverick-whoop-live-test` — held by `tools/testsign.py`, exactly
+as the Maverick core crates commit `[N; 32]` seeds for their own trust tests. It is DEVELOPMENT scope
+only; every production trust policy refuses it, and it never signs a release artifact. This lets
+`tools/regenerate.py --check` stay a keyless freshness gate that anyone can reproduce, instead of a
+frozen state nobody can refresh once the original external signer walks away.
 
 ---
 

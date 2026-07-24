@@ -332,13 +332,17 @@ def deep_validate(root: Path, sdk_path: Path, tool_dir: Path) -> None:
                 root,
             )
             registry_root = json.loads((root / "registry/root-v1.json").read_text())
-            connector_id = json.loads((config_path.parent / "parity-v1.json").read_text())["connector_id"]
+            report = json.loads((config_path.parent / "parity-v1.json").read_text())
+            connector_id = report["connector_id"]
+            # The registry entry is keyed by the artifact's own manifest version, not a fixed literal;
+            # verify-artifact rejects a version that disagrees with the manifest (MAV-11059).
+            connector_version = report["connector_version"]
             run(
                 [
                     str(tool_dir / "mavconn-registry"), "verify-artifact",
                     str(root / "registry/index-v1.json"), registry_root["registry_id"],
                     registry_root["key_id"], registry_root["public_key_hex"], "1",
-                    connector_id, "1.0.0", str(artifact),
+                    connector_id, connector_version, str(artifact),
                 ],
                 root,
             )
