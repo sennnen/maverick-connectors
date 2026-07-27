@@ -22,12 +22,17 @@ decision in [ADR-017](https://github.com/sennnen/maverick/blob/main/docs/adr/ADR
 - Metadata, ABI compatibility, publisher signature, revocation, limits, and embedded tests pass
   before installation.
 - WHOOP 4.0 and WHOOP 5.0/MG are separate artifacts using the same public path as third parties.
+- Exactly one artifact ships inside the app — Generic HR Monitor — and it installs through that same
+  public path, inspection and approval token included. A published standard is not a device driver;
+  bundling the latter is what the connector architecture exists to avoid.
 
 ## Current contents
 
+- `connectors/generic-hr/` — the Bluetooth SIG Heart Rate Service connector, "Generic HR Monitor";
 - `connectors/template/` — exact-version public SDK consumer, native test, Wasm exports, metadata;
 - `connectors/whoop4/` — signed-test WHOOP 4.0 connector with fourteen parity-profiled fixtures;
 - `connectors/whoop5/` — signed-test WHOOP 5.0/MG connector with twelve parity-profiled fixtures;
+- `crates/ble-sig/` — no-std adopted Bluetooth SIG profiles, decoded once for every connector;
 - `crates/whoop-protocol/` — no-std pure framing, control, safe-offload, and record-routing reference;
 - `registry/schema-v1.json` — frozen ABI v1 schema hashes used by external authors;
 - `registry/index-schema-v1.json` — signed discovery, rotation, and revocation schema;
@@ -39,10 +44,12 @@ decision in [ADR-017](https://github.com/sennnen/maverick/blob/main/docs/adr/ADR
 
 ```text
 connectors/
+  generic-hr/               Bluetooth SIG Heart Rate Service, the one connector the app ships with
   template/                 public-SDK consumer and metadata example
   whoop4/                   standalone SDK project + fixtures
   whoop5/                   standalone SDK project + fixtures
 crates/
+  ble-sig/                  adopted SIG profiles, shared by every connector that speaks one
   whoop-protocol/           connector-local shared pure protocol code
 tools/                      local validation and future publish wrappers
 registry/                   signed metadata/index fixtures; never private signing keys

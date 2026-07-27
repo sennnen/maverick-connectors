@@ -47,7 +47,7 @@ fn real_v24_record_replays_all_admitted_values() {
     assert_eq!(
         samples[1],
         sample(
-            "rr-interval",
+            "pulse-interval",
             555_000_000,
             1_780_928_574_000,
             0,
@@ -57,7 +57,7 @@ fn real_v24_record_replays_all_admitted_values() {
     assert_eq!(
         samples[2],
         sample(
-            "rr-interval",
+            "pulse-interval",
             564_000_000,
             1_780_928_574_000,
             1,

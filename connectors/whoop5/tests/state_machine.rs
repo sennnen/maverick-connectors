@@ -3,7 +3,6 @@
 use mav_connector_sdk::abi::*;
 use mav_connector_sdk::TestDriver;
 use mav_connector_whoop5::{Whoop5Connector, CONNECTOR_ID, GEN5_SERVICE};
-use sha2::{Digest, Sha256};
 use whoop_protocol::{crc16_modbus, crc32, decode_frame, Generation};
 
 fn event(sequence: u64, body: EventBody) -> ConnectorEvent {
@@ -709,7 +708,7 @@ fn packaged_fixtures_match_native_actions_and_state() {
             );
         }
         assert_eq!(
-            <[u8; 32]>::from(Sha256::digest(driver.snapshot().unwrap())),
+            driver.snapshot_hash().unwrap(),
             fixture.expected_state_hash,
             "fixture {} state",
             fixture.name

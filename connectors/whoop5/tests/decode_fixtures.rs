@@ -123,7 +123,7 @@ fn a_realtime_burst_emits_every_rr_slot_it_declares() {
     let samples = decode_payload(&payload).unwrap();
     let rr = samples
         .iter()
-        .filter(|sample| sample.stream == "rr-interval")
+        .filter(|sample| sample.stream == "pulse-interval")
         .collect::<Vec<_>>();
     assert_eq!(rr.len(), 6, "every declared slot must reach the pipeline");
     assert_eq!(rr[0].value_microunits, 800_000_000);

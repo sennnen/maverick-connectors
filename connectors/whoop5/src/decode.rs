@@ -63,7 +63,7 @@ pub fn decode_standard_heart_rate(
             if rr_1024 != 0 {
                 let milliseconds = (u64::from(rr_1024) * 1000 + 512) / 1024;
                 samples.push(sample(
-                    "rr-interval",
+                    "pulse-interval",
                     i64::try_from(milliseconds).map_err(|_| DecodeError::Truncated)? * 1_000_000,
                     wall_time_ms,
                     sequence,
@@ -218,11 +218,10 @@ fn decode_v18(body: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     Ok(samples)
 }
 
-/// Decode a type-43 raw-AFE frame (opcode 63 stream) into per-channel samples at 100 Hz: the ECG
-/// electrode lead and the two optical PPG channels. The v0x0b subtype (u32 full-resolution
-/// channels) is intentionally left undecoded and yields no samples rather than an error.
-// The raw AFE stream carries two interleaved subtypes: v0x0a (100 Hz ECG + two PPG, u16) and v0x0b
-// (25 Hz pulse-ox red/IR/ambient, signed i32). Both are surfaced only in a probe build.
+/// Decode a type-43 raw-AFE frame (opcode 63 stream) into per-channel samples. Two interleaved
+/// subtypes: v0x0a carries the ECG electrode lead and two optical channels at 100 Hz, v0x0b the
+/// pulse-ox red, infrared and ambient channels at 25 Hz. Both only in a probe build, because a
+/// release artifact never opens a stream this expensive to the strap's battery.
 #[cfg(feature = "ecg-probe")]
 fn decode_raw_afe(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     if let Ok(frame) = whoop_protocol::decode_realtime_raw(payload) {
@@ -231,8 +230,8 @@ fn decode_raw_afe(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             whoop_protocol::RAW_SAMPLE_RATE_HZ,
             &[
                 ("ecg", frame.ecg.as_slice()),
-                ("ppg-raw-a", frame.ppg_a.as_slice()),
-                ("ppg-raw-b", frame.ppg_b.as_slice()),
+                ("optical-raw", frame.ppg_a.as_slice()),
+                ("optical-raw", frame.ppg_b.as_slice()),
             ],
         ));
     }
@@ -241,16 +240,18 @@ fn decode_raw_afe(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
             frame.unix_time,
             whoop_protocol::PULSE_OX_SAMPLE_RATE_HZ,
             &[
-                ("ppg-red", frame.red.as_slice()),
-                ("ppg-ir", frame.ir.as_slice()),
-                ("ppg-ambient", frame.ambient.as_slice()),
+                ("red-ppg", frame.red.as_slice()),
+                ("infrared-ppg", frame.ir.as_slice()),
+                ("ambient-light", frame.ambient.as_slice()),
             ],
         ));
     }
     Ok(Vec::new())
 }
 
-// One WireSample per sample, timestamped by the frame's Unix second plus the per-sample step.
+/// One WireSample per sample, timestamped by the frame's Unix second plus the per-sample step.
+/// Channels sharing a stream name are distinguished by sequence, `channel * samples + sample`,
+/// which is the layout `optical-raw` is defined by.
 #[cfg(feature = "ecg-probe")]
 fn emit_raw_channels<T: Copy + Into<i64>>(
     unix_time: u32,
@@ -259,14 +260,22 @@ fn emit_raw_channels<T: Copy + Into<i64>>(
 ) -> Vec<WireSample> {
     let base_ms = i64::from(unix_time) * 1000;
     let step_ms = 1000 / i64::from(rate_hz);
+    let mut shared: Vec<(&str, u32)> = Vec::new();
     let mut samples = Vec::new();
     for (stream, channel) in channels {
-        for (sequence, &counts) in channel.iter().enumerate() {
+        let offset = match shared.iter_mut().find(|(named, _)| named == stream) {
+            Some((_, used)) => std::mem::replace(used, *used + channel.len() as u32),
+            None => {
+                shared.push((stream, channel.len() as u32));
+                0
+            }
+        };
+        for (index, &counts) in channel.iter().enumerate() {
             samples.push(sample(
                 stream,
                 counts.into() * 1_000_000,
-                base_ms + sequence as i64 * step_ms,
-                sequence as u32,
+                base_ms + index as i64 * step_ms,
+                offset + index as u32,
                 "counts",
             ));
         }
@@ -405,7 +414,7 @@ fn push_rr(
         let rr = u16::from_le_bytes([value[0], value[1]]);
         if rr != 0 {
             samples.push(sample(
-                "rr-interval",
+                "pulse-interval",
                 i64::from(rr) * 1_000_000,
                 time_ms,
                 sequence,

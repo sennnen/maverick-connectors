@@ -21,6 +21,10 @@
 //! PPG (positive on skin, rail negative in open air), ambient is an ambient-light photodiode (floods
 //! in open light), and a 940 nm remote moves the IR channel far more than red. See
 //! `docs/protocol/whoop-raw-afe.md`.
+//!
+//! **WHOOP 4.0 has this stream too**, opened by the same opcode 63 `[0x01]`. Its v0x0a shares these
+//! channel offsets (but gen4 has no electrode, so all three are optical), and its v0x0b carries only
+//! red + IR at **50 Hz** with no ambient channel — decoded by [`decode_pulse_ox_gen4`].
 
 use crate::ProtocolError;
 
@@ -55,6 +59,12 @@ const OFF_RED: usize = 0x026;
 const OFF_IR: usize = 0x0ee;
 const OFF_AMBIENT: usize = 0x6b9;
 const PULSE_OX_CHANNEL_BYTES: usize = PULSE_OX_SAMPLES_PER_FRAME * 4;
+
+/// Samples per channel in a **gen4** v0x0b frame: 50 per one-second frame, i.e. 50 Hz.
+pub const PULSE_OX_SAMPLES_PER_FRAME_GEN4: usize = 50;
+/// The gen4 v0x0b pulse-ox sample rate, in hertz — double gen5's.
+pub const PULSE_OX_SAMPLE_RATE_HZ_GEN4: u32 = 50;
+const GEN4_PULSE_OX_CHANNEL_BYTES: usize = PULSE_OX_SAMPLES_PER_FRAME_GEN4 * 4;
 
 /// One decoded v0x0a raw-AFE frame: three synchronous 100-sample channels at 100 Hz.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,6 +150,57 @@ pub fn decode_pulse_ox(payload: &[u8]) -> Result<RawPulseOxFrame, ProtocolError>
         ir: channel_i32(payload, OFF_IR),
         ambient: channel_i32(payload, OFF_AMBIENT),
     })
+}
+
+/// One decoded **gen4** v0x0b frame: red and IR at 50 Hz. WHOOP 4.0 carries no ambient reference
+/// channel and no ECG electrode, so this is the whole optical set it exposes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawPulseOxFrameGen4 {
+    /// Strap Unix time (seconds) the frame's samples span one second from.
+    pub unix_time: u32,
+    /// Red LED reflective PPG channel.
+    pub red: [i32; PULSE_OX_SAMPLES_PER_FRAME_GEN4],
+    /// Infrared LED reflective PPG channel.
+    pub ir: [i32; PULSE_OX_SAMPLES_PER_FRAME_GEN4],
+}
+
+/// Decode a **gen4** v0x0b pulse-ox frame (red + IR, 50 Hz, contiguous from `0x026`).
+///
+/// WHOOP 4.0 packs 50 samples per channel into the same 200-byte stride where gen5 puts 25, and
+/// omits gen5's ambient channel entirely — so the gen5 decoder cannot read these frames.
+pub fn decode_pulse_ox_gen4(payload: &[u8]) -> Result<RawPulseOxFrameGen4, ProtocolError> {
+    if payload.first() != Some(&REALTIME_RAW_DATA) {
+        return Err(ProtocolError::NotHistoricalRecord);
+    }
+    if payload.get(1) != Some(&VERSION_V0B) || payload.len() < OFF_IR + GEN4_PULSE_OX_CHANNEL_BYTES
+    {
+        return Err(ProtocolError::InvalidLength);
+    }
+    let unix_time = u32::from_le_bytes([
+        payload[UNIX_OFFSET],
+        payload[UNIX_OFFSET + 1],
+        payload[UNIX_OFFSET + 2],
+        payload[UNIX_OFFSET + 3],
+    ]);
+    Ok(RawPulseOxFrameGen4 {
+        unix_time,
+        red: channel_i32_gen4(payload, OFF_RED),
+        ir: channel_i32_gen4(payload, OFF_IR),
+    })
+}
+
+fn channel_i32_gen4(payload: &[u8], offset: usize) -> [i32; PULSE_OX_SAMPLES_PER_FRAME_GEN4] {
+    let mut out = [0i32; PULSE_OX_SAMPLES_PER_FRAME_GEN4];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let at = offset + 4 * i;
+        *slot = i32::from_le_bytes([
+            payload[at],
+            payload[at + 1],
+            payload[at + 2],
+            payload[at + 3],
+        ]);
+    }
+    out
 }
 
 fn channel_i32(payload: &[u8], offset: usize) -> [i32; PULSE_OX_SAMPLES_PER_FRAME] {
@@ -231,6 +292,29 @@ mod tests {
                 && f.red[24] == -99_976
                 && f.ir[0] == 180_000
                 && f.ambient[0] == 13_000_000
+        ));
+    }
+
+    #[test]
+    fn decodes_gen4_pulse_ox_fifty_samples() {
+        // gen4 packs 50 samples per channel contiguously from 0x026; there is no ambient channel.
+        let mut p = vec![0u8; OFF_IR + GEN4_PULSE_OX_CHANNEL_BYTES];
+        p[0] = REALTIME_RAW_DATA;
+        p[1] = VERSION_V0B;
+        p[UNIX_OFFSET..UNIX_OFFSET + 4].copy_from_slice(&1_785_176_041u32.to_le_bytes());
+        for i in 0..PULSE_OX_SAMPLES_PER_FRAME_GEN4 {
+            p[OFF_RED + 4 * i..OFF_RED + 4 * i + 4]
+                .copy_from_slice(&(380_000i32 + i as i32).to_le_bytes());
+            p[OFF_IR + 4 * i..OFF_IR + 4 * i + 4]
+                .copy_from_slice(&(-147_000i32 + i as i32).to_le_bytes());
+        }
+        let decoded = decode_pulse_ox_gen4(&p);
+        assert!(matches!(
+            &decoded,
+            Ok(f) if f.unix_time == 1_785_176_041
+                && f.red[0] == 380_000
+                && f.red[49] == 380_049
+                && f.ir[0] == -147_000
         ));
     }
 

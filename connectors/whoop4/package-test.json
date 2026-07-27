@@ -4,7 +4,7 @@
   "wasm": "mav_connector_whoop4.wasm",
   "publisher_key_id": "maverick-whoop-live-test",
   "public_key_hex": "e1b71abfd3232804261e423f36556f6b4185bed41fdfd00d769ce15a394f43ce",
-  "signed_sha256": "8c1bfbba2de2f4f5fd587fada63449ee6caaad6afbcbfb19e142c52f0a6f86f2",
-  "signature_hex": "ec6db9d4771d4d408cdb8999a67e43175ef68053725db7500636cf96811de49cb935deaacf8d70dca54f9de2b0c730277c76f0baea9564fee7890d83f0664b0b",
-  "artifact_sha256": "4f1d13cad4ebda43d6ca1adc89686ba29076a27835e9fff0e450dd0e3fd6ffa7"
+  "signed_sha256": "403e2211459b54336501051e82567973666a2b6be30fc05ee53171db2360ad58",
+  "signature_hex": "03c2ccebd0b3e2f59e99aaa4d1e7dad62d0c00d06a882c14c41afd937a83a2e320e0b3422978a6239193441368ebaf5e53f0fd5fbdc686cc243170bbd8ec2b07",
+  "artifact_sha256": "cbba766ea7c9e69b1025274cd56438fa53b78426469ab40b4d30b702af1055d8"
 }

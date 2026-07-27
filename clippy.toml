@@ -1,0 +1,5 @@
+# The same rule the core workspace uses: library code may never unwrap, expect or panic, and a test
+# may do all three — a test that cannot fail loudly is not doing its job.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

@@ -5,7 +5,6 @@ use mav_connector_sdk::abi::*;
 use mav_connector_sdk::{
     artifact_metadata, export_connector, ActionBuilder, Connector, ConnectorError, TestDriver,
 };
-use sha2::{Digest, Sha256};
 use whoop_protocol::{
     build_command, decode_control, decode_frame, decode_response, get_data_range, history_ack,
     request_history, CommandResponse, Control, Deframer, Generation,
@@ -211,16 +210,27 @@ impl Connector for Whoop4Connector {
                 characteristic_id, ..
             } if characteristic_id == COMMAND_ID && self.phase == Phase::Configuring => {
                 self.phase = Phase::Streaming;
-                self.actions(
-                    &event,
-                    vec![
-                        ActionBody::DeclareCapabilities { streams: streams() },
-                        ActionBody::SetTimer {
-                            token: IDLE_TIMER,
-                            delay_ms: IDLE_DELAY_MS,
-                        },
-                    ],
-                )
+                #[cfg_attr(not(feature = "raw-probe"), allow(unused_mut))]
+                let mut actions = vec![
+                    ActionBody::DeclareCapabilities { streams: streams() },
+                    ActionBody::SetTimer {
+                        token: IDLE_TIMER,
+                        delay_ms: IDLE_DELAY_MS,
+                    },
+                ];
+                // Opcode 63 `[0x01]` starts the type-43 raw AFE stream on gen4 exactly as it does on
+                // gen5 — the revision byte is required. Probe builds only: raw streaming costs
+                // battery and bandwidth that a release build has no consumer for.
+                #[cfg(feature = "raw-probe")]
+                {
+                    let start_raw = self.command(whoop_protocol::START_AFE_RAW, &[1])?;
+                    actions.push(ActionBody::Write {
+                        characteristic_id: COMMAND_ID.to_owned(),
+                        bytes: start_raw,
+                        confirmed: true,
+                    });
+                }
+                self.actions(&event, actions)
             }
             EventBody::Notification {
                 characteristic_id,
@@ -668,7 +678,7 @@ fn protocol_error(error: whoop_protocol::ProtocolError) -> ConnectorError {
 fn streams() -> Vec<String> {
     [
         "heart-rate",
-        "rr-interval",
+        "pulse-interval",
         "gravity",
         "spo2-raw",
         "skin-temp-raw",
@@ -1011,7 +1021,7 @@ fn native_parity_fixture(
     for event in &events {
         expected.push(driver.drive(event.clone())?);
     }
-    let expected_state_hash = Sha256::digest(driver.snapshot()?).into();
+    let expected_state_hash = driver.snapshot_hash()?;
     Ok(FixtureCase {
         name: name.to_owned(),
         initial_state,
@@ -1045,8 +1055,8 @@ fn record_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
     let time_v24 = 1_780_928_574_000;
     let v24_samples = vec![
         wire_sample("heart-rate", 109_000_000, time_v24, 0, "beats-per-minute"),
-        wire_sample("rr-interval", 555_000_000, time_v24, 0, "milliseconds"),
-        wire_sample("rr-interval", 564_000_000, time_v24, 1, "milliseconds"),
+        wire_sample("pulse-interval", 555_000_000, time_v24, 0, "milliseconds"),
+        wire_sample("pulse-interval", 564_000_000, time_v24, 1, "milliseconds"),
         wire_sample("gravity", -403_115, time_v24, 0, "milli-g"),
         wire_sample("gravity", 450_591, time_v24, 1, "milli-g"),
         wire_sample("gravity", 872_478, time_v24, 2, "milli-g"),
@@ -1097,14 +1107,14 @@ fn record_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
                     "beats-per-minute",
                 ),
                 wire_sample(
-                    "rr-interval",
+                    "pulse-interval",
                     800_000_000,
                     1_780_000_000_000,
                     0,
                     "milliseconds",
                 ),
                 wire_sample(
-                    "rr-interval",
+                    "pulse-interval",
                     810_000_000,
                     1_780_000_000_000,
                     1,
@@ -1149,7 +1159,7 @@ fn stream_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
             vec![0x10, 64, 0x33, 0x03],
             vec![
                 wire_sample("heart-rate", 64_000_000, time, 0, "beats-per-minute"),
-                wire_sample("rr-interval", 800_000_000, time, 0, "milliseconds"),
+                wire_sample("pulse-interval", 800_000_000, time, 0, "milliseconds"),
             ],
         )?,
         notification_fixture(
@@ -1158,8 +1168,8 @@ fn stream_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
             fixture_gen4_frame(&realtime)?,
             vec![
                 wire_sample("heart-rate", 64_000_000, time, 0, "beats-per-minute"),
-                wire_sample("rr-interval", 800_000_000, time, 0, "milliseconds"),
-                wire_sample("rr-interval", 810_000_000, time, 1, "milliseconds"),
+                wire_sample("pulse-interval", 800_000_000, time, 0, "milliseconds"),
+                wire_sample("pulse-interval", 810_000_000, time, 1, "milliseconds"),
             ],
         )?,
         notification_fixture(

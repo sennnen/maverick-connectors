@@ -14,6 +14,8 @@ pub fn decode_payload(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     };
     match packet_type {
         40 => decode_realtime(payload),
+        #[cfg(feature = "raw-probe")]
+        43 => decode_raw_afe(payload),
         47 => decode_record(payload),
         48 => decode_event(payload),
         36 | 49 => Ok(Vec::new()),
@@ -21,51 +23,89 @@ pub fn decode_payload(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
     }
 }
 
+// WHOOP 4.0 does carry a raw AFE stream — opcode 63 `[0x01]`, the same trigger as gen5, verified on
+// hardware. Its two subtypes differ from gen5: v0a shares gen5's three 100 Hz u16 channel offsets
+// (but gen4 has no ECG electrode, so all three are optical), and v0b carries only red + IR at 50 Hz
+// with no ambient reference. Probe builds only.
+#[cfg(feature = "raw-probe")]
+fn decode_raw_afe(payload: &[u8]) -> Result<Vec<WireSample>, DecodeError> {
+    if let Ok(frame) = whoop_protocol::decode_realtime_raw(payload) {
+        return Ok(emit_raw_channels(
+            frame.unix_time,
+            whoop_protocol::RAW_SAMPLE_RATE_HZ,
+            &[
+                ("ppg-raw-a", frame.ppg_a.as_slice()),
+                ("ppg-raw-b", frame.ecg.as_slice()),
+                ("ppg-raw-c", frame.ppg_b.as_slice()),
+            ],
+        ));
+    }
+    if let Ok(frame) = whoop_protocol::decode_pulse_ox_gen4(payload) {
+        return Ok(emit_raw_channels(
+            frame.unix_time,
+            whoop_protocol::PULSE_OX_SAMPLE_RATE_HZ_GEN4,
+            &[
+                ("ppg-red", frame.red.as_slice()),
+                ("ppg-ir", frame.ir.as_slice()),
+            ],
+        ));
+    }
+    Ok(Vec::new())
+}
+
+#[cfg(feature = "raw-probe")]
+fn emit_raw_channels<T: Copy + Into<i64>>(
+    unix_time: u32,
+    rate_hz: u32,
+    channels: &[(&str, &[T])],
+) -> Vec<WireSample> {
+    let base_ms = i64::from(unix_time) * 1000;
+    let step_ms = 1000 / i64::from(rate_hz);
+    let mut samples = Vec::new();
+    for (stream, channel) in channels {
+        for (sequence, &counts) in channel.iter().enumerate() {
+            samples.push(sample(
+                stream,
+                counts.into() * 1_000_000,
+                base_ms + sequence as i64 * step_ms,
+                sequence as u32,
+                "counts",
+            ));
+        }
+    }
+    samples
+}
+
+/// Decode the Bluetooth SIG Heart Rate Measurement characteristic. WHOOP 4.0 publishes the
+/// standard profile alongside its own, and the profile is decoded once for everyone in `ble-sig`;
+/// what belongs here is only which stream a wrist-worn optical strap's beats go on.
 pub fn decode_standard_heart_rate(
     bytes: &[u8],
     wall_time_ms: i64,
 ) -> Result<Vec<WireSample>, DecodeError> {
-    let Some(&flags) = bytes.first() else {
-        return Err(DecodeError::Truncated);
-    };
-    let wide = flags & 1 != 0;
-    let heart_bytes = if wide { 2 } else { 1 };
-    if bytes.len() < 1 + heart_bytes {
-        return Err(DecodeError::Truncated);
-    }
-    let heart_rate = if wide {
-        i64::from(u16::from_le_bytes([bytes[1], bytes[2]]))
-    } else {
-        i64::from(bytes[1])
-    };
+    let measurement = ble_sig::decode_heart_rate(bytes).map_err(|_| DecodeError::Truncated)?;
     let mut samples = Vec::new();
-    if heart_rate > 0 {
+    if measurement.beats_per_minute > 0 {
         samples.push(sample(
             "heart-rate",
-            heart_rate * 1_000_000,
+            i64::from(measurement.beats_per_minute) * 1_000_000,
             wall_time_ms,
             0,
             "beats-per-minute",
         ));
     }
-    if flags & 0x10 != 0 {
-        let mut at = 1 + heart_bytes;
-        let mut sequence = 0;
-        while let Some(value) = bytes.get(at..at + 2) {
-            let rr_1024 = u16::from_le_bytes([value[0], value[1]]);
-            if rr_1024 != 0 {
-                let milliseconds = (u64::from(rr_1024) * 1000 + 512) / 1024;
-                samples.push(sample(
-                    "rr-interval",
-                    i64::try_from(milliseconds).map_err(|_| DecodeError::Truncated)? * 1_000_000,
-                    wall_time_ms,
-                    sequence,
-                    "milliseconds",
-                ));
-                sequence += 1;
-            }
-            at += 2;
-        }
+    for (sequence, (at_ms, interval_ms)) in measurement
+        .timed_intervals(wall_time_ms)
+        .into_iter()
+        .enumerate()
+    {
+        samples.push(sample(
+            "pulse-interval",
+            i64::from(interval_ms) * 1_000_000,
+            at_ms,
+            sequence as u32,
+            "milliseconds",
+        ));
     }
     Ok(samples)
 }
@@ -258,7 +298,7 @@ fn push_rr(
         let rr = u16::from_le_bytes([value[0], value[1]]);
         if rr != 0 {
             samples.push(sample(
-                "rr-interval",
+                "pulse-interval",
                 i64::from(rr) * 1_000_000,
                 time_ms,
                 sequence,

@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "ble-sig"
+version = "0.1.0"
+
+[[package]]
 name = "block-buffer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -75,6 +79,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mav-connector-generic-hr"
+version = "0.1.0"
+dependencies = [
+ "ble-sig",
+ "mav-connector-sdk",
+]
+
+[[package]]
 name = "mav-connector-sdk"
 version = "0.1.1"
 dependencies = [
@@ -93,8 +105,8 @@ dependencies = [
 name = "mav-connector-whoop4"
 version = "0.1.0"
 dependencies = [
+ "ble-sig",
  "mav-connector-sdk",
- "sha2",
  "whoop-protocol",
 ]
 
@@ -103,7 +115,6 @@ name = "mav-connector-whoop5"
 version = "0.1.0"
 dependencies = [
  "mav-connector-sdk",
- "sha2",
  "whoop-protocol",
 ]
 

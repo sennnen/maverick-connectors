@@ -47,7 +47,11 @@ ARTIFACT_URL = (
     "https://github.com/sennnen/maverick-connectors/releases/download/registry-v1/sha256-{}.mavconn"
 )
 # package name -> the basename maverick vendors it under in fixtures/connectors/
-MAVERICK_FIXTURE = {"mav-connector-whoop4": "whoop4", "mav-connector-whoop5": "whoop5"}
+MAVERICK_FIXTURE = {
+    "mav-connector-generic-hr": "generic_hr",
+    "mav-connector-whoop4": "whoop4",
+    "mav-connector-whoop5": "whoop5",
+}
 
 
 def regenerate(sdk_path: Path, tool_dir: Path, maverick_root: Path | None) -> int:

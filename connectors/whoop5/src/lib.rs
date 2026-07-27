@@ -5,7 +5,6 @@ use mav_connector_sdk::abi::*;
 use mav_connector_sdk::{
     artifact_metadata, export_connector, ActionBuilder, Connector, ConnectorError, TestDriver,
 };
-use sha2::{Digest, Sha256};
 use whoop_protocol::{
     build_command, decode_control, decode_response, get_data_range, history_ack, request_history,
     CommandResponse, Control, ControlResult, Deframer, Generation,
@@ -1011,9 +1010,17 @@ fn protocol_error(error: whoop_protocol::ProtocolError) -> ConnectorError {
 }
 
 fn streams() -> Vec<String> {
+    /// The raw analog-front-end channels. Declared only by a probe build, because a release
+    /// artifact never opens that stream: it costs the strap's battery and its bandwidth, and no
+    /// host stage reads a channel nothing is streaming.
+    #[cfg(feature = "ecg-probe")]
+    const RAW_AFE: [&str; 4] = ["ecg", "red-ppg", "infrared-ppg", "ambient-light"];
+    #[cfg(not(feature = "ecg-probe"))]
+    const RAW_AFE: [&str; 0] = [];
+
     [
         "heart-rate",
-        "rr-interval",
+        "pulse-interval",
         "gravity",
         "skin-temp",
         "spo2-percent",
@@ -1029,6 +1036,7 @@ fn streams() -> Vec<String> {
         "wrist-state",
     ]
     .into_iter()
+    .chain(RAW_AFE)
     .map(str::to_owned)
     .collect()
 }
@@ -1369,7 +1377,7 @@ fn native_parity_fixture(
     for event in &events {
         expected.push(driver.drive(event.clone())?);
     }
-    let expected_state_hash = Sha256::digest(driver.snapshot()?).into();
+    let expected_state_hash = driver.snapshot_hash()?;
     Ok(FixtureCase {
         name: name.to_owned(),
         initial_state,
@@ -1403,8 +1411,8 @@ fn record_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
     let time_v18 = 1_780_916_150_000;
     let v18_samples = vec![
         wire_sample("heart-rate", 102_000_000, time_v18, 0, "beats-per-minute"),
-        wire_sample("rr-interval", 602_000_000, time_v18, 0, "milliseconds"),
-        wire_sample("rr-interval", 613_000_000, time_v18, 1, "milliseconds"),
+        wire_sample("pulse-interval", 602_000_000, time_v18, 0, "milliseconds"),
+        wire_sample("pulse-interval", 613_000_000, time_v18, 1, "milliseconds"),
         wire_sample("gravity", -725_173, time_v18, 0, "milli-g"),
         wire_sample("gravity", 494_417, time_v18, 1, "milli-g"),
         wire_sample("gravity", 496_855, time_v18, 2, "milli-g"),
@@ -1533,7 +1541,7 @@ fn stream_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
             vec![0x10, 64, 0x33, 0x03],
             vec![
                 wire_sample("heart-rate", 64_000_000, time, 0, "beats-per-minute"),
-                wire_sample("rr-interval", 800_000_000, time, 0, "milliseconds"),
+                wire_sample("pulse-interval", 800_000_000, time, 0, "milliseconds"),
             ],
         )?,
         notification_fixture(
@@ -1542,8 +1550,8 @@ fn stream_fixtures() -> Result<Vec<FixtureCase>, ConnectorError> {
             fixture_gen5_frame(&realtime)?,
             vec![
                 wire_sample("heart-rate", 64_000_000, time, 0, "beats-per-minute"),
-                wire_sample("rr-interval", 800_000_000, time, 0, "milliseconds"),
-                wire_sample("rr-interval", 810_000_000, time, 1, "milliseconds"),
+                wire_sample("pulse-interval", 800_000_000, time, 0, "milliseconds"),
+                wire_sample("pulse-interval", 810_000_000, time, 1, "milliseconds"),
             ],
         )?,
         notification_fixture(

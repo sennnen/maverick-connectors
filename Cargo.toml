@@ -4,6 +4,8 @@ members = [
     "connectors/template",
     "connectors/whoop4",
     "connectors/whoop5",
+    "connectors/generic-hr",
+    "crates/ble-sig",
     "crates/whoop-protocol",
 ]
 
@@ -18,3 +20,13 @@ expect_used = "deny"
 panic = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+# Connector artifacts are shipped, signed and loaded on a phone, so they are tuned for size and for
+# how long the interpreter spends parsing them rather than for compile time. `strip` also removes
+# the Wasm name section, which is pure debug weight inside a signed artifact.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

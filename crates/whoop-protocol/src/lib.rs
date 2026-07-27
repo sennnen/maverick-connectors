@@ -11,9 +11,10 @@ use alloc::vec::Vec;
 
 pub use deframe::Deframer;
 pub use realtime_raw::{
-    decode_pulse_ox, decode_realtime_raw, RawAfeFrame, RawPulseOxFrame, PULSE_OX_SAMPLES_PER_FRAME,
-    PULSE_OX_SAMPLE_RATE_HZ, RAW_SAMPLES_PER_FRAME, RAW_SAMPLE_RATE_HZ, REALTIME_RAW_DATA,
-    START_AFE_RAW, STOP_AFE_RAW,
+    decode_pulse_ox, decode_pulse_ox_gen4, decode_realtime_raw, RawAfeFrame, RawPulseOxFrame,
+    RawPulseOxFrameGen4, PULSE_OX_SAMPLES_PER_FRAME, PULSE_OX_SAMPLES_PER_FRAME_GEN4,
+    PULSE_OX_SAMPLE_RATE_HZ, PULSE_OX_SAMPLE_RATE_HZ_GEN4, RAW_SAMPLES_PER_FRAME,
+    RAW_SAMPLE_RATE_HZ, REALTIME_RAW_DATA, START_AFE_RAW, STOP_AFE_RAW,
 };
 pub use response::{
     decode_battery_event, decode_response, refused_opcodes, BatteryEvent, CommandResponse,
