@@ -2,9 +2,9 @@
   "schema": "mavconn-parity/v1",
   "connector_id": "dev.maverick.generic-hr",
   "connector_version": "1.0.0",
-  "artifact_sha256": "33a7c5141295ef9d5c030cb0706963291c2ce432f9c82a1375367056730c26f2",
+  "artifact_sha256": "68386e9d4c34f901183a00b746f790925dce049f9ed5086569e477a4b484bc98",
   "manifest_sha256": "72da8bbd6ea71c6ff57378e7eafe8fdcb830cbf26267091683200eb3953fdced",
-  "signed_sha256": "c7b7653452bbc4fed2a4ee0b719ec1720a8182043be898d79c7af96e51330022",
+  "signed_sha256": "ee47fde872e5aeda33f84c683d9525e601493cefc9fdd126e2e412f14e8f08fc",
   "fixture_count": 3,
   "fixtures": [
     {
@@ -14,7 +14,7 @@
       "action_trace_sha256": "20a43fb21bc4a749475905d7e6656661889c263d9f6ae8886ccb508b0d888e1d",
       "sample_sha256": "731693f745ccd265eb7f493f508117c9f77f43fff47f61ed94f3ec3e9f636f89",
       "final_state_sha256": "4197297dd7d25cb72e1c95f996b8d963d605a56e4db8824dca5738aedc8d92ce",
-      "max_fuel_consumed": 92942,
+      "max_fuel_consumed": 93054,
       "peak_memory_bytes": 1179648
     },
     {
@@ -24,7 +24,7 @@
       "action_trace_sha256": "c8f5e148321234d611929badc1e5dfe7923a155aff6a4a057613aeddf454a917",
       "sample_sha256": "40a13c02e2a36bea73a40b6ec140f1fa9e5de9cb173b4cfc4d510b501b058147",
       "final_state_sha256": "4197297dd7d25cb72e1c95f996b8d963d605a56e4db8824dca5738aedc8d92ce",
-      "max_fuel_consumed": 92942,
+      "max_fuel_consumed": 93054,
       "peak_memory_bytes": 1179648
     },
     {
@@ -34,7 +34,7 @@
       "action_trace_sha256": "3c37c46237c577974c7d645f098bb820ae4e5510866186fd8dc0c6ff784fb5b0",
       "sample_sha256": "75383e55542672db55bc3baf912d566accd909c71b699ca15ed59d590af1f59e",
       "final_state_sha256": "7eb034e9e99266b80c8e871021dc1b1d63add23db94637b48c0ea31cf1da0d67",
-      "max_fuel_consumed": 54143,
+      "max_fuel_consumed": 54255,
       "peak_memory_bytes": 1179648
     }
   ]

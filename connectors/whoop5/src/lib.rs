@@ -126,6 +126,9 @@ enum Phase {
 #[derive(Debug)]
 pub struct Whoop5Connector {
     phase: Phase,
+    /// Host power policy (ADR-030). Not snapshotted: the host re-states it on activate and resume,
+    /// so it can never drift out of sync with the user's setting.
+    low_power: bool,
     subscriptions: u8,
     command_seq: u8,
     next_operation: u64,
@@ -187,6 +190,7 @@ impl Default for Whoop5Connector {
     fn default() -> Self {
         Self {
             phase: Phase::Idle,
+            low_power: false,
             subscriptions: 0,
             command_seq: 1,
             next_operation: 1,
@@ -267,6 +271,9 @@ impl Connector for Whoop5Connector {
                 self.phase = Phase::Subscribing;
                 self.actions(
                     &event,
+                    // The console carries firmware diagnostics only. In low power it is the one
+                    // subscription worth dropping: it costs notifications without feeding a sample
+                    // (ADR-030). The vitals characteristics are never dropped.
                     [
                         STANDARD_HR_ID,
                         COMMAND_RESPONSE_ID,
@@ -275,6 +282,7 @@ impl Connector for Whoop5Connector {
                         CONSOLE_ID,
                     ]
                     .into_iter()
+                    .filter(|id| !(self.low_power && *id == CONSOLE_ID))
                     .map(|id| ActionBody::Subscribe {
                         characteristic_id: id.to_owned(),
                     })
@@ -311,11 +319,17 @@ impl Connector for Whoop5Connector {
                     )
                 }
             }
+            EventBody::PowerModeChanged { low_power } => {
+                self.low_power = *low_power;
+                Ok(empty())
+            }
             EventBody::Subscribed { characteristic_id } => {
                 if let Some(bit) = subscription_bit(characteristic_id) {
                     self.subscriptions |= bit;
                 }
-                if self.subscriptions == ALL_SUBSCRIPTIONS && self.phase == Phase::Subscribing {
+                if self.subscriptions == self.expected_subscriptions()
+                    && self.phase == Phase::Subscribing
+                {
                     self.phase = Phase::Configuring;
                     self.config_step = 0;
                     let hello = self.command(145, &[1])?;
@@ -339,7 +353,7 @@ impl Connector for Whoop5Connector {
                         &event,
                         vec![ActionBody::SetTimer {
                             token: IDLE_TIMER,
-                            delay_ms: IDLE_DELAY_MS,
+                            delay_ms: self.idle_delay_ms(),
                         }],
                     );
                 }
@@ -362,7 +376,7 @@ impl Connector for Whoop5Connector {
                             },
                             ActionBody::SetTimer {
                                 token: IDLE_TIMER,
-                                delay_ms: IDLE_DELAY_MS,
+                                delay_ms: self.idle_delay_ms(),
                             },
                         ],
                     );
@@ -519,7 +533,7 @@ impl Whoop5Connector {
                         },
                         ActionBody::SetTimer {
                             token: IDLE_TIMER,
-                            delay_ms: IDLE_DELAY_MS,
+                            delay_ms: self.idle_delay_ms(),
                         },
                     ],
                 )
@@ -773,7 +787,7 @@ impl Whoop5Connector {
                         },
                         ActionBody::SetTimer {
                             token: IDLE_TIMER,
-                            delay_ms: IDLE_DELAY_MS,
+                            delay_ms: self.idle_delay_ms(),
                         },
                     ],
                 )
@@ -904,6 +918,24 @@ impl Whoop5Connector {
         )
     }
 
+    /// The subscription mask that means "handshake can proceed" under the current power policy.
+    fn expected_subscriptions(&self) -> u8 {
+        if self.low_power {
+            ALL_SUBSCRIPTIONS & !CONSOLE_SUBSCRIPTION_BIT
+        } else {
+            ALL_SUBSCRIPTIONS
+        }
+    }
+
+    /// Delay before the next historical offload, stretched in low power.
+    fn idle_delay_ms(&self) -> u64 {
+        if self.low_power {
+            IDLE_DELAY_MS * LOW_POWER_IDLE_MULTIPLIER
+        } else {
+            IDLE_DELAY_MS
+        }
+    }
+
     fn command(&mut self, opcode: u8, body: &[u8]) -> Result<Vec<u8>, ConnectorError> {
         let seq = self.take_command_seq();
         build_command(Generation::Gen5, seq, opcode, body).map_err(protocol_error)
@@ -974,6 +1006,13 @@ fn has_uuid(values: &[String], expected: &str) -> bool {
         .iter()
         .any(|value| value.eq_ignore_ascii_case(expected))
 }
+
+/// Console is skipped in low power, so the "subscriptions complete" gate must expect one bit fewer
+/// or the handshake would stall waiting for a subscription that was never requested.
+const CONSOLE_SUBSCRIPTION_BIT: u8 = 16;
+/// How much longer to wait between historical offloads in low power. History is not time-critical,
+/// so stretching the cadence is the largest battery saving available without losing data.
+const LOW_POWER_IDLE_MULTIPLIER: u64 = 5;
 
 fn subscription_bit(id: &str) -> Option<u8> {
     match id {

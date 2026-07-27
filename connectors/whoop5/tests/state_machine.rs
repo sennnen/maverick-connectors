@@ -834,3 +834,82 @@ fn console_frames_become_diagnostics_and_never_samples() {
     assert_eq!(code, "whoop5-console");
     assert_eq!(message, "RTC timestamp invalid; not saving\n");
 }
+
+/// Low power must drop the console subscription — the one channel that costs notifications without
+/// producing a sample — and must not drop any vitals characteristic (ADR-030).
+#[test]
+fn low_power_skips_only_the_console_subscription() {
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    driver
+        .drive(event(0, EventBody::PowerModeChanged { low_power: true }))
+        .unwrap();
+    drive_to_subscribing(&mut driver);
+    let subscribed: Vec<String> = bodies(
+        driver
+            .drive(event(
+                5,
+                EventBody::ServicesDiscovered {
+                    service_uuids: vec![GEN5_SERVICE.to_owned(), "180d".to_owned()],
+                },
+            ))
+            .unwrap(),
+    )
+    .into_iter()
+    .filter_map(|body| match body {
+        ActionBody::Subscribe { characteristic_id } => Some(characteristic_id),
+        _ => None,
+    })
+    .collect();
+    assert!(
+        !subscribed.iter().any(|id| id == "console"),
+        "low power must not subscribe to the console: {subscribed:?}"
+    );
+    for vital in ["standard-heart-rate", "command-response", "events", "data"] {
+        assert!(
+            subscribed.iter().any(|id| id == vital),
+            "low power must keep {vital}: {subscribed:?}"
+        );
+    }
+}
+
+/// The handshake gate counts subscriptions, so skipping one must not stall it: the connector still
+/// reaches the configuring phase and writes its hello.
+#[test]
+fn low_power_handshake_still_completes_without_the_console() {
+    let mut driver = TestDriver::new(Whoop5Connector::default());
+    driver
+        .drive(event(0, EventBody::PowerModeChanged { low_power: true }))
+        .unwrap();
+    drive_to_subscribing(&mut driver);
+    driver
+        .drive(event(
+            5,
+            EventBody::ServicesDiscovered {
+                service_uuids: vec![GEN5_SERVICE.to_owned(), "180d".to_owned()],
+            },
+        ))
+        .unwrap();
+    let mut wrote_hello = false;
+    for (sequence, id) in ["standard-heart-rate", "command-response", "events", "data"]
+        .into_iter()
+        .enumerate()
+    {
+        let emitted = bodies(
+            driver
+                .drive(event(
+                    6 + sequence as u64,
+                    EventBody::Subscribed {
+                        characteristic_id: id.to_owned(),
+                    },
+                ))
+                .unwrap(),
+        );
+        wrote_hello |= emitted
+            .iter()
+            .any(|body| matches!(body, ActionBody::Write { .. }));
+    }
+    assert!(
+        wrote_hello,
+        "the four vitals subscriptions must complete the handshake in low power"
+    );
+}

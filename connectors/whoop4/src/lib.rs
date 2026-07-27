@@ -21,6 +21,8 @@ const ALL_SUBSCRIPTIONS: u8 = 0x0f;
 const IDLE_TIMER: TimerToken = TimerToken(100);
 const RESPONSE_TIMER: TimerToken = TimerToken(101);
 const IDLE_DELAY_MS: u64 = 60_000;
+/// How much longer to wait between historical offloads in low power (ADR-030).
+const LOW_POWER_IDLE_MULTIPLIER: u64 = 5;
 /// A live sample newer than this keeps the link reserved for streaming, so the periodic offload
 /// deadline is pushed out instead of preempting realtime notifications.
 const LIVE_ACTIVE_MS: i64 = 10_000;
@@ -45,6 +47,9 @@ enum Phase {
 #[derive(Debug)]
 pub struct Whoop4Connector {
     phase: Phase,
+    /// Host power policy (ADR-030). Not snapshotted: the host re-states it on activate and resume.
+    /// The 4.0 exposes no diagnostic-only characteristic, so all it trades is offload cadence.
+    low_power: bool,
     subscriptions: u8,
     command_seq: u8,
     next_operation: u64,
@@ -97,6 +102,7 @@ impl Default for Whoop4Connector {
     fn default() -> Self {
         Self {
             phase: Phase::Idle,
+            low_power: false,
             subscriptions: 0,
             command_seq: 1,
             next_operation: 1,
@@ -185,6 +191,10 @@ impl Connector for Whoop4Connector {
                     )
                 }
             }
+            EventBody::PowerModeChanged { low_power } => {
+                self.low_power = *low_power;
+                Ok(empty())
+            }
             EventBody::Subscribed { characteristic_id } => {
                 if let Some(bit) = subscription_bit(characteristic_id) {
                     self.subscriptions |= bit;
@@ -215,7 +225,7 @@ impl Connector for Whoop4Connector {
                     ActionBody::DeclareCapabilities { streams: streams() },
                     ActionBody::SetTimer {
                         token: IDLE_TIMER,
-                        delay_ms: IDLE_DELAY_MS,
+                        delay_ms: self.idle_delay_ms(),
                     },
                 ];
                 // Opcode 63 `[0x01]` starts the type-43 raw AFE stream on gen4 exactly as it does on
@@ -242,7 +252,7 @@ impl Connector for Whoop4Connector {
                         &event,
                         vec![ActionBody::SetTimer {
                             token: IDLE_TIMER,
-                            delay_ms: IDLE_DELAY_MS,
+                            delay_ms: self.idle_delay_ms(),
                         }],
                     );
                 }
@@ -265,7 +275,7 @@ impl Connector for Whoop4Connector {
                             },
                             ActionBody::SetTimer {
                                 token: IDLE_TIMER,
-                                delay_ms: IDLE_DELAY_MS,
+                                delay_ms: self.idle_delay_ms(),
                             },
                         ],
                     );
@@ -445,7 +455,7 @@ impl Whoop4Connector {
                         },
                         ActionBody::SetTimer {
                             token: IDLE_TIMER,
-                            delay_ms: IDLE_DELAY_MS,
+                            delay_ms: self.idle_delay_ms(),
                         },
                     ],
                 )
@@ -574,6 +584,16 @@ impl Whoop4Connector {
                 message: message.to_owned(),
             }],
         )
+    }
+
+    /// Delay before the next historical offload, stretched in low power. History is not
+    /// time-critical, so cadence is the largest saving available without losing data.
+    fn idle_delay_ms(&self) -> u64 {
+        if self.low_power {
+            IDLE_DELAY_MS * LOW_POWER_IDLE_MULTIPLIER
+        } else {
+            IDLE_DELAY_MS
+        }
     }
 
     fn command(&mut self, opcode: u8, body: &[u8]) -> Result<Vec<u8>, ConnectorError> {
